@@ -159,10 +159,10 @@ async function renderSlate(view, stale) {
       <div class="chip-row">${m.utterances.map(chipHtml).join('')}</div>
       <div class="card-actions">
         <button class="primary act-weave">Weave</button>
-        <button class="secondary act-reject">Reject</button>
-      </div>
-      <div class="chip-picker" hidden>
-        ${REJECT_CHIPS.map(([k, label], n) => `<button data-chip="${k}"><kbd>${n + 1}</kbd>${label}</button>`).join('')}
+        <div class="chip-picker" role="group" aria-label="Reject with reason">
+          <span class="picker-label">Reject —</span>
+          ${REJECT_CHIPS.map(([k, label], n) => `<button data-chip="${k}"><kbd>${n + 1}</kbd>${label}</button>`).join('')}
+        </div>
       </div>
     </article>`,
     )
@@ -172,8 +172,7 @@ async function renderSlate(view, stale) {
     const card = $(`[data-idx="${i}"]`, view);
     wireChips(card, m.utterances);
     $('.act-weave', card).addEventListener('click', (e) => weaveMoment(m.id, e.target.closest('button')));
-    $('.act-reject', card).addEventListener('click', () => togglePicker(view, card, m.id, i));
-    $$('.chip-picker button', card).forEach((b) =>
+    $$('.chip-picker button[data-chip]', card).forEach((b) =>
       b.addEventListener('click', () => rejectMoment(m.id, b.dataset.chip)),
     );
     card.addEventListener('click', (e) => {
@@ -185,19 +184,17 @@ async function renderSlate(view, stale) {
 }
 
 function closeAllPickers(scope = document) {
-  $$('.chip-picker', scope).forEach((p) => (p.hidden = true));
+  $$('.chip-picker.armed', scope).forEach((p) => p.classList.remove('armed'));
   state.rejecting = null;
 }
 
-function togglePicker(view, card, momentId, idx) {
+/** Chips are always visible; 'x' ARMS the selected card's chips so keys 1-6 apply to it. */
+function armPicker(view, card, momentId) {
+  closeAllPickers(view); // only one card armed at a time
   const p = $('.chip-picker', card);
-  const willOpen = p.hidden;
-  closeAllPickers(view); // only one picker armed at a time
-  p.hidden = !willOpen;
-  if (willOpen) {
+  if (p) {
+    p.classList.add('armed');
     state.rejecting = momentId;
-    state.sel = idx; // the armed card and the highlighted card can never diverge
-    updateSelection(view);
   }
 }
 
@@ -598,9 +595,11 @@ document.addEventListener('keydown', (e) => {
     case 'w':
       current?.querySelector('.act-weave')?.click();
       break;
-    case 'x':
-      current?.querySelector('.act-reject')?.click();
+    case 'x': {
+      const id = current?.dataset.id;
+      if (id && current.querySelector('.chip-picker')) armPicker(view, current, id);
       break;
+    }
     case '.':
       current?.querySelector('.chip')?.click();
       break;

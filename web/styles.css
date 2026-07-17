@@ -203,13 +203,17 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .danger-link { background: none; border: 0; color: var(--muted); padding: 6px 8px; }
 .danger-link:hover { color: var(--risk); }
 
-.chip-picker { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip-picker { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-left: 6px; }
+.picker-label { font-size: 11px; color: var(--muted); margin-right: 2px; }
 .chip-picker button {
-  font-size: 12px; border: 1px solid var(--line-strong); background: var(--surface);
-  border-radius: 999px; padding: 4px 10px;
+  font-size: 11px; color: var(--muted); border: 1px solid transparent; background: none;
+  border-radius: 999px; padding: 3px 8px;
 }
-.chip-picker button:hover { border-color: var(--risk); color: var(--risk); }
-.chip-picker kbd { margin-right: 4px; }
+.chip-picker button:hover { border-color: var(--risk); color: var(--risk); background: var(--risk-soft); }
+.chip-picker.armed button { border-color: var(--line-strong); color: var(--ink); }
+.chip-picker.armed button:hover { border-color: var(--risk); color: var(--risk); }
+.chip-picker kbd { margin-right: 3px; border: 0; background: none; opacity: 0.6; }
+.card-actions { flex-wrap: wrap; }
 
 /* ---------- drafts ---------- */
 .list-row {
