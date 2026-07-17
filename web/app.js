@@ -95,17 +95,25 @@ function wireChips(container, utterances) {
 /* ---------- diff rendering ---------- */
 
 function diffHtml(diffText) {
-  const lines = diffText.split('\n').map((l) => {
-    let cls = '';
-    if (l.startsWith('+') && !l.startsWith('+++')) cls = 'add';
-    else if (l.startsWith('-') && !l.startsWith('---')) cls = 'del';
-    else if (l.startsWith('@@')) cls = 'hunk';
-    return `<div class="dline ${cls}">${esc(l) || '&nbsp;'}</div>`;
-  });
+  const lines = diffText
+    .split('\n')
+    .filter((l) => !/^(===|---|\+\+\+|@@|\\ No newline)/.test(l))
+    .map((l) => {
+      let cls = '';
+      if (l.startsWith('+')) cls = 'add';
+      else if (l.startsWith('-')) cls = 'del';
+      return `<div class="dline ${cls}">${esc(l) || '&nbsp;'}</div>`;
+    });
   return `<div class="diff">${lines.join('')}</div>`;
 }
 
 /* ---------- views ---------- */
+
+const FORMAT_LABEL = { li_post: 'LinkedIn', x_thread: 'X thread', blog: 'Blog', clip_spec: 'Clip spec' };
+const TIER_LABEL = { L0_compliance: 'compliance', L1_brand: 'brand rule', L2_channel: 'channel rule', L3_taste: 'taste' };
+const STATE_LABEL = { draft: 'in edit', in_approval: 'awaiting approval', approved: 'approved', published: 'published', declined: 'declined' };
+const STATE_CLASS = { draft: 'in-edit', in_approval: 'candidate', approved: 'approved', published: 'published', declined: 'rejected' };
+const fmtLabel = (f) => FORMAT_LABEL[f] ?? f;
 
 const REJECT_CHIPS = [
   ['not_our_pov', 'Not our POV'],
@@ -198,7 +206,18 @@ async function rejectMoment(id, chip) {
     await api(`${state.ws}/moments/${id}/reject`, { method: 'POST', body: { chip } });
     state.rejecting = null;
     toast(`Rejected — ${chip.replace(/_/g, ' ')}. This feeds the distiller.`);
-    render();
+    // Remove just the card — no full re-render, no scroll jump, no replayed animations.
+    const card = $(`.card[data-id="${CSS.escape(id)}"]`, $('#view'));
+    if (card) {
+      card.classList.add('leaving');
+      setTimeout(() => {
+        card.remove();
+        updateSelection($('#view'));
+        if ($$('.card', $('#view')).length === 0) render();
+      }, 180);
+    } else {
+      render();
+    }
   } catch (e) {
     toast(e.message, true);
   }
@@ -227,9 +246,12 @@ async function renderDrafts(view, stale) {
     <button class="list-row ${i === state.sel ? 'selected' : ''}" data-idx="${i}" data-id="${esc(d.id)}">
       <span>
         <span class="title">${esc(d.content.slice(0, 80))}${d.content.length > 80 ? '…' : ''}</span><br/>
-        <span class="sub">${esc(d.id)} · ${esc(d.format)} · constitution v${d.constitutionVersion}${d.holdout ? ' · holdout' : ''}</span>
+        <span class="sub">${esc(fmtLabel(d.format))} · rules v${d.constitutionVersion}${d.holdout ? ' · holdout' : ''}</span>
       </span>
-      <span class="pill neutral">${d.editCount} edit${d.editCount === 1 ? '' : 's'}</span>
+      <span>
+        <span class="pill ${STATE_CLASS[d.state] ?? 'neutral'}">${esc(STATE_LABEL[d.state] ?? d.state)}</span>
+        <span class="pill neutral">${d.editCount} edit${d.editCount === 1 ? '' : 's'}</span>
+      </span>
     </button>`,
     )
     .join('');
@@ -248,13 +270,14 @@ async function renderDraftDetail(view, id, stale) {
   view.innerHTML = `
     <button class="backlink" id="back">← All drafts</button>
     <div class="meta-row">
-      <span class="pill neutral">${esc(d.format)}</span>
-      <span class="pill neutral">constitution v${d.constitutionVersion}</span>
-      ${d.holdout ? '<span class="pill shadow">holdout</span>' : ''}
+      <span class="pill ${STATE_CLASS[d.state] ?? 'neutral'}">${esc(STATE_LABEL[d.state] ?? d.state)}</span>
+      <span class="pill neutral">${esc(fmtLabel(d.format))}</span>
+      <span class="pill neutral">rules v${d.constitutionVersion}</span>
+      ${d.holdout ? '<span class="pill shadow" title="Reserved for evaluation — never used as training signal">holdout</span>' : ''}
     </div>
     <div class="draft-content" id="draft-content">${esc(d.content)}</div>
     <div class="card-actions" style="margin-top:14px">
-      <button class="primary" id="edit-btn">Edit as the human editor</button>
+      <button class="primary" id="edit-btn">Edit this draft</button>
     </div>
     <div id="editor-zone" hidden>
       <div class="section-label">Your edit becomes policy</div>
@@ -313,15 +336,15 @@ async function renderConstitution(view, stale) {
       <article class="card ${i === state.sel ? 'selected' : ''}" data-idx="${i}" data-id="${esc(p.id)}">
         <div class="meta-row">
           <span class="pill ${esc(p.status)}">${esc(p.status)}</span>
-          <span class="pill neutral">${esc(p.tier)}</span>
-          <span class="pill neutral">scope: ${esc(p.scope.channel ?? 'all channels')}</span>
+          <span class="pill neutral">${esc(TIER_LABEL[p.tier] ?? p.tier)}</span>
+          <span class="pill neutral">scope: ${esc(p.scope.channel ? fmtLabel(p.scope.channel) : 'all channels')}</span>
           ${p.blast ? `<span class="pill ${p.blast.radius > 0.1 ? 'risk' : 'active'}">blast ${(p.blast.radius * 100).toFixed(0)}%</span>` : ''}
         </div>
         <p class="principle-text">${esc(p.text)}</p>
         <p class="counterexample">Does not apply: ${p.counterexamples.map(esc).join(' · ')}</p>
         <div class="card-actions">
           <button class="secondary act-open">Review diffs</button>
-          ${p.status === 'candidate' ? `<button class="primary act-ratify">Ratify (run counterfactuals)</button>` : ''}
+          ${p.status === 'candidate' ? `<button class="primary act-ratify">Run counterfactuals</button>` : ''}
           ${p.status === 'shadow' ? `<button class="primary act-promote">Promote to active</button>` : ''}
           ${['candidate', 'shadow'].includes(p.status) ? `<button class="danger-link act-reject-p">Reject</button>` : ''}
         </div>
@@ -368,10 +391,15 @@ async function renderConstitution(view, stale) {
 }
 
 async function renderPrincipleDetail(view, id, stale) {
-  const [principles, report] = await Promise.all([
+  const [principles, report, allDrafts] = await Promise.all([
     api(`${state.ws}/constitution`),
     api(`${state.ws}/principles/${id}/report`),
+    api(`${state.ws}/drafts`),
   ]);
+  const draftLabel = (draftId) => {
+    const d = allDrafts.find((x) => x.id === draftId);
+    return d ? `${fmtLabel(d.format)} — “${d.content.slice(0, 56).replace(/\s+/g, ' ')}…”` : draftId;
+  };
   if (stale()) return;
   const p = principles.find((x) => x.id === id);
   if (!p) { state.detail = null; return render(); }
@@ -382,14 +410,14 @@ async function renderPrincipleDetail(view, id, stale) {
 
   view.innerHTML = `
     <button class="backlink" id="back">← Constitution</button>
-    <div class="meta-row"><span class="pill ${esc(p.status)}">${esc(p.status)}</span><span class="pill neutral">${esc(p.tier)}</span></div>
+    <div class="meta-row"><span class="pill ${esc(p.status)}">${esc(p.status)}</span><span class="pill neutral">${esc(TIER_LABEL[p.tier] ?? p.tier)}</span><span class="pill neutral">scope: ${esc(p.scope.channel ? fmtLabel(p.scope.channel) : 'all channels')}</span></div>
     <p class="principle-text" style="font-size:19px">${esc(p.text)}</p>
     <p class="counterexample">Does not apply: ${p.counterexamples.map(esc).join(' · ')}</p>
 
     <div class="section-label">Ratify behavior, not prose</div>
     ${total === 0
       ? `<div class="empty">No counterfactual run yet.<div class="hint">Run Ratify to see what this principle would have changed.</div></div>
-         <div style="text-align:center"><button class="primary" id="ratify-btn">Ratify (run counterfactuals)</button></div>`
+         <div style="text-align:center"><button class="primary" id="ratify-btn">Run counterfactuals</button></div>`
       : `
     <div class="blast">
       <div><div class="num">${b.inScopeChanged}/${b.inScopeTotal}</div><div class="lbl">in scope changed</div></div>
@@ -401,7 +429,7 @@ async function renderPrincipleDetail(view, id, stale) {
         ? '⛔ Blast radius exceeds 10% — acceptance is blocked. Narrow the scope or reject.'
         : '✓ Within tolerance. Accepting sends this principle to shadow for a week of observation.'}
     </div>
-    ${changed.map((r) => `<div class="diff-title ${r.inScope ? '' : 'bleed'}">${esc(r.draftId)} ${r.inScope ? '(in scope)' : '⚠ OUT OF SCOPE — this is scope bleed'}</div>${diffHtml(r.diff)}`).join('') || '<p class="whynow">No drafts changed under this principle.</p>'}
+    ${changed.map((r) => `<div class="diff-title ${r.inScope ? '' : 'bleed'}">${esc(draftLabel(r.draftId))} ${r.inScope ? '' : '⚠ OUT OF SCOPE — this is scope bleed'}</div>${diffHtml(r.diff)}`).join('') || '<p class="whynow">No drafts changed under this principle.</p>'}
     `}
     <div class="card-actions" style="margin-top:16px">
       ${p.status === 'candidate' && total > 0
@@ -504,7 +532,8 @@ async function render() {
   view.classList.toggle('no-anim', !state.animate);
   state.animate = false;
   view.setAttribute('aria-busy', 'true');
-  view.innerHTML = '<div class="empty"><span class="spin" aria-hidden="true">◌</span> Loading…</div>';
+  view.innerHTML = '<span class="visually-hidden">Loading</span>' +
+    '<div class="skeleton" aria-hidden="true"><div class="bone w85"></div><div class="bone w60"></div><div class="bone w40"></div></div>'.repeat(3);
   try {
     await def.render(view, stale);
   } catch (e) {
