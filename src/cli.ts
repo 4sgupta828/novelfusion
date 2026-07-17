@@ -19,6 +19,7 @@ import {
 } from './db/index.js';
 import { ingestFile, ingestDocument, ingestUrl } from './pipeline/ingest.js';
 import { extractMoments } from './pipeline/moments.js';
+import { embedBackfill, answerQuery } from './pipeline/retrieval.js';
 import { proposeStubs, weaveDraft } from './pipeline/weave.js';
 import { captureEdit } from './pipeline/edits.js';
 import { distill } from './pipeline/distill.js';
@@ -96,6 +97,34 @@ program
   .action(function (this: Command, sourceId: string) {
     admitSource(ws(this), sourceId);
     console.log(`admitted ${sourceId}`);
+  });
+
+program
+  .command('embed')
+  .description('backfill embeddings + FTS index for admitted passages (corpus retrieval)')
+  .action(async function (this: Command) {
+    if (!config.flags.corpusQuery) console.warn('note: NF_FLAG_CORPUS_QUERY is off — the Query surface will stay disabled, but embedding still runs.');
+    const r = await embedBackfill(ws(this));
+    console.log(`embedded ${r.embedded} passage(s); FTS-indexed ${r.ftsIndexed}${r.error ? ` (stopped: ${r.error})` : ''}`);
+  });
+
+program
+  .command('query')
+  .argument('<question...>', 'natural-language question answered from the corpus')
+  .description('hybrid retrieval + grounded answer with receipts (LLM; needs OPENAI + ANTHROPIC keys)')
+  .action(async function (this: Command, question: string[]) {
+    if (!config.flags.corpusQuery) throw new Error('corpus query is disabled — set NF_FLAG_CORPUS_QUERY=true.');
+    const workspaceId = ws(this);
+    await embedBackfill(workspaceId);
+    const r = await answerQuery(workspaceId, question.join(' '));
+    if (r.gap) {
+      console.log(`\n[coverage gap] the corpus does not support an answer — ${r.trace.coverageReason}.`);
+      if (r.trace.dropped.length) console.log('dropped claims:', r.trace.dropped.map((d) => `${d.reason}`).join('; '));
+      return;
+    }
+    console.log(`\n${r.answer}\n`);
+    console.log('receipts:');
+    for (const c of r.claims) console.log(`  • "${c.supportingSpan}" [${c.spanMethod}] ← ${c.utteranceIds.join(', ')}`);
   });
 
 program

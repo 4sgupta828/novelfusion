@@ -22,7 +22,11 @@ import {
   updatePrincipleStatus,
   admitSource,
   listSources,
+  listUtterances,
+  insertSourceBlob,
+  getSourceBlob,
 } from './db/index.js';
+import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
 import { captureEditContent } from './pipeline/edits.js';
 import { assertPrincipleTransition } from './domain/lifecycle.js';
 import { distill } from './pipeline/distill.js';
@@ -99,6 +103,11 @@ app.get('/api/workspaces', wrap((_req, res) => {
 
 app.get('/api/templates', wrap((_req, res) => {
   res.json(TEMPLATES.map((t) => ({ id: t.id, name: t.name, blurb: t.blurb, sections: t.sections })));
+}));
+
+// Client-visible feature flags (drives conditional UI: Query box, download affordance).
+app.get('/api/config', wrap((_req, res) => {
+  res.json({ flags: { corpusQuery: config.flags.corpusQuery, retainOriginals: config.flags.retainOriginals } });
 }));
 
 app.get('/api/:ws/slate', wrap((req, res) => {
@@ -224,9 +233,22 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 app.post('/api/:ws/ingest-file', upload.array('files', 20), wrap(async (req, res) => {
   const files = (req.files as Express.Multer.File[]) ?? [];
   if (files.length === 0) throw new Error('no files uploaded');
+  const ws = param(req, 'ws');
   const results = [];
   for (const f of files) {
-    const r = await ingestUploadBuffer(param(req, 'ws'), f.originalname, f.buffer, {});
+    const r = await ingestUploadBuffer(ws, f.originalname, f.buffer, {});
+    // Retain the original bytes (workspace-scoped) so the source can be downloaded. Killable
+    // via NF_FLAG_RETAIN_ORIGINALS=false. Only uploads carry bytes; URLs/pasted text do not.
+    if (config.flags.retainOriginals) {
+      insertSourceBlob({
+        sourceId: r.source.id,
+        workspaceId: ws,
+        filename: f.originalname,
+        mime: f.mimetype || 'application/octet-stream',
+        size: f.size,
+        bytes: f.buffer,
+      });
+    }
     results.push({ id: r.source.id, title: r.source.title, kind: r.source.kind, segmentCount: r.segmentCount });
   }
   res.json(results);
@@ -247,6 +269,60 @@ app.post('/api/:ws/ingest-doc', wrap((req, res) => {
 app.post('/api/:ws/sources/:id/admit', wrap((req, res) => {
   admitSource(param(req, 'ws'), param(req, 'id'));
   res.json({ ok: true });
+}));
+
+// Source detail — passages with locators (View). Read-only; workspace-scoped.
+app.get('/api/:ws/sources/:id', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const id = param(req, 'id');
+  const passages = listUtterances(ws, id);
+  if (passages.length === 0) return void res.status(404).json({ error: 'source not found or has no passages' });
+  const blob = config.flags.retainOriginals ? getSourceBlob(ws, id) : null;
+  res.json({
+    id,
+    passages: passages.map((u) => ({ id: u.id, speaker: u.speaker, text: u.text, locator: u.locator, provenanceClass: u.provenanceClass, seq: u.seq })),
+    download: blob ? { filename: blob.filename, mime: blob.mime, size: blob.size } : null,
+  });
+}));
+
+// Download the original uploaded bytes (workspace-scoped; 404 if not retained).
+app.get('/api/:ws/sources/:id/download', wrap((req, res) => {
+  const blob = getSourceBlob(param(req, 'ws'), param(req, 'id'));
+  if (!blob) return void res.status(404).json({ error: 'no original file retained for this source' });
+  res.setHeader('Content-Type', blob.mime);
+  res.setHeader('Content-Disposition', `attachment; filename="${blob.filename.replace(/"/g, '')}"`);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.send(blob.bytes);
+}));
+
+// Export the extracted passages as text (always available — this is what the corpus holds).
+app.get('/api/:ws/sources/:id/export', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const id = param(req, 'id');
+  const passages = listUtterances(ws, id);
+  if (passages.length === 0) return void res.status(404).json({ error: 'source not found' });
+  const body = passages
+    .map((u) => {
+      const loc = u.locator;
+      const anchor = loc.kind === 'document' ? [loc.page ? `p.${loc.page}` : '', loc.heading ? `§${loc.heading}` : ''].filter(Boolean).join(' ')
+        : loc.kind === 'webpage' ? (loc.anchor ? `§${loc.anchor}` : '') : (u.speaker ?? '');
+      return `${anchor ? `[${anchor}] ` : ''}${u.text}`;
+    })
+    .join('\n\n');
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${id}.txt"`);
+  res.send(body);
+}));
+
+// ---------- corpus query (hybrid retrieval + grounded answer; flag-gated) ----------
+
+app.post('/api/:ws/query', wrap(async (req, res) => {
+  if (!config.flags.corpusQuery) return void res.status(404).json({ error: 'corpus query is disabled (flag NF_FLAG_CORPUS_QUERY off)' });
+  const ws = param(req, 'ws');
+  const q = req.body?.q;
+  if (typeof q !== 'string' || q.trim().length < 3) throw new Error('query is required (min 3 chars)');
+  await embedBackfill(ws); // lazy: ensure admitted passages are embedded + FTS-indexed (best-effort)
+  res.json(await answerQuery(ws, q.trim()));
 }));
 
 // ---------- actions (LLM — require credentials; errors surface to the UI) ----------

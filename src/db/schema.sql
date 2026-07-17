@@ -34,6 +34,42 @@ CREATE TABLE IF NOT EXISTS utterances (
 );
 CREATE INDEX IF NOT EXISTS idx_utterances_ws ON utterances(workspace_id, source_id, seq);
 
+-- Original uploaded bytes (opt-in retention, download feature). Confidential source
+-- data: workspace-scoped, size-capped at the ingest boundary. Kept separate from the
+-- hot utterances path so no passage read ever drags a file blob.
+CREATE TABLE IF NOT EXISTS source_blobs (
+  source_id TEXT PRIMARY KEY REFERENCES sources(id),
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  filename TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  bytes BLOB NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Dense embeddings sidecar (retrieval flag). Kept OFF the hot SELECT u.* path.
+-- model/dim carried so the dense leg never cosines across two embedding spaces
+-- (the "dual embedding" landmine). workspace_id denormalized for the isolation filter.
+CREATE TABLE IF NOT EXISTS passage_embeddings (
+  utterance_id TEXT PRIMARY KEY REFERENCES utterances(id),
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  model TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  vec BLOB NOT NULL,                     -- Float32Array bytes
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_passage_emb_ws ON passage_embeddings(workspace_id, model);
+
+-- BM25 lexical recall leg (retrieval flag). FTS5 is NON-PORTABLE to Postgres tsvector —
+-- deliberately isolated behind ftsSearch()/ftsUpsertPassages() in index.ts; Phase-1 rewrite.
+-- workspace_id is a stored filter column: every MATCH query ANDs on it (FTS5 does not
+-- inherit the base table's tenancy).
+CREATE VIRTUAL TABLE IF NOT EXISTS passage_fts USING fts5(
+  utterance_id UNINDEXED,
+  workspace_id UNINDEXED,
+  text
+);
+
 CREATE TABLE IF NOT EXISTS moments (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),

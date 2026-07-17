@@ -723,10 +723,23 @@ async function renderCorpus(view, stale) {
   setBudget(0);
   const segTotal = sources.reduce((a, s) => a + s.segmentCount, 0);
 
+  const queryBox = state.serverFlags?.corpusQuery
+    ? `<form class="corpus-query" id="query-form">
+        <div class="corpus-query-row">
+          <input type="text" id="query-input" placeholder="Ask the corpus a question…" aria-label="Ask the corpus" autocomplete="off" />
+          <button class="primary" type="submit">Ask</button>
+        </div>
+        <span class="corpus-query-hint">Answered only from this workspace's passages, with receipts. It refuses rather than guess.</span>
+      </form>
+      <div id="query-result" class="query-result" hidden></div>`
+    : '';
+
   view.innerHTML = `
     <div class="corpus-intro">
       <p class="corpus-lede">Everything this workspace can draw from. Drop documents, paste text, or add a public URL — each becomes provenance-linked passages the pipeline cites as receipts. <strong class="corpus-boundary">Scoped to this workspace only.</strong></p>
     </div>
+
+    ${queryBox}
 
     <div class="corpus-ingest">
       <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload files">
@@ -778,22 +791,48 @@ function sourcesHtml(sources) {
         ? `<a class="corpus-uri" href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer">${esc(s.uri)}</a>`
         : `<span class="corpus-uri">${esc(s.uri || '—')}</span>`;
       return `
-      <div class="corpus-row" data-id="${esc(s.id)}">
-        <span class="chip ${b.cls}" data-mark="${b.mark}" aria-hidden="false">${b.label}</span>
-        <div class="corpus-row-main">
-          <div class="corpus-title">${esc(s.title || 'Untitled source')}</div>
-          <div class="corpus-sub">${sub}</div>
+      <div class="corpus-row-wrap" data-id="${esc(s.id)}">
+        <div class="corpus-row" role="button" tabindex="0" aria-expanded="false" title="View passages">
+          <span class="corpus-caret" aria-hidden="true">▸</span>
+          <span class="chip ${b.cls}" data-mark="${b.mark}" aria-hidden="false">${b.label}</span>
+          <div class="corpus-row-main">
+            <div class="corpus-title">${esc(s.title || 'Untitled source')}</div>
+            <div class="corpus-sub">${sub}</div>
+          </div>
+          <div class="corpus-row-meta">
+            <span class="pill neutral">${s.segmentCount} passage${s.segmentCount === 1 ? '' : 's'}</span>
+            <span class="pill neutral">${esc(CONSENT_LABEL[s.consentBasis] ?? s.consentBasis)}</span>
+            ${s.admitted
+              ? '<span class="pill active" title="In the extraction pool">admitted</span>'
+              : `<button class="secondary act-admit" title="Admit into the extraction pool">Admit</button>`}
+          </div>
         </div>
-        <div class="corpus-row-meta">
-          <span class="pill neutral">${s.segmentCount} passage${s.segmentCount === 1 ? '' : 's'}</span>
-          <span class="pill neutral">${esc(CONSENT_LABEL[s.consentBasis] ?? s.consentBasis)}</span>
-          ${s.admitted
-            ? '<span class="pill active" title="In the extraction pool">admitted</span>'
-            : `<button class="secondary act-admit" title="Admit into the extraction pool">Admit</button>`}
-        </div>
+        <div class="corpus-drawer" hidden></div>
       </div>`;
     })
     .join('');
+}
+
+/** Passage drawer for one source — its extracted passages with locators + download/export. */
+function drawerHtml(detail) {
+  const dl = detail.download
+    ? `<a class="secondary corpus-dl" href="/api/${esc(state.ws)}/sources/${esc(detail.id)}/download" download>↓ Original (${esc(detail.download.filename)})</a>`
+    : '';
+  const passages = detail.passages
+    .map((p) => {
+      const { mark, text } = chipLabel({ locator: p.locator, speaker: p.speaker, sourceTitle: undefined, tStartSec: null });
+      return `<div class="corpus-passage">
+        <span class="corpus-passage-loc" data-mark="${mark}">${text}</span>
+        <p class="corpus-passage-text">${esc(p.text)}</p>
+      </div>`;
+    })
+    .join('');
+  return `
+    <div class="corpus-drawer-actions">
+      ${dl}
+      <a class="secondary corpus-dl" href="/api/${esc(state.ws)}/sources/${esc(detail.id)}/export" download>↓ Extracted text (.txt)</a>
+    </div>
+    <div class="corpus-passages">${passages}</div>`;
 }
 
 function wireCorpus(view) {
@@ -852,15 +891,81 @@ function wireCorpus(view) {
     });
   });
 
-  $$('.corpus-row', view).forEach((row) => {
-    $('.act-admit', row)?.addEventListener('click', (e) =>
+  // Query box (flag-gated) — grounded answer with receipts, or an honest coverage gap.
+  $('#query-form', view)?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const q = $('#query-input', view).value.trim();
+    if (q.length < 3) return void toast('Ask a fuller question (3+ characters).', true);
+    const out = $('#query-result', view);
+    out.hidden = false;
+    out.innerHTML = '<div class="query-thinking"><span class="spin" aria-hidden="true">◌</span> searching the corpus…</div>';
+    busy(e.submitter, async () => {
+      try {
+        const r = await api(`${state.ws}/query`, { method: 'POST', body: { q } });
+        renderQueryResult(out, r);
+      } catch (err) {
+        out.innerHTML = `<div class="query-gap">Couldn't answer — ${esc(err.message)}</div>`;
+      }
+    });
+  });
+
+  // Source rows: expand to a passage drawer (fetch on first open).
+  $$('.corpus-row-wrap', view).forEach((wrap) => {
+    const row = $('.corpus-row', wrap);
+    const drawer = $('.corpus-drawer', wrap);
+    $('.act-admit', wrap)?.addEventListener('click', (e) => {
+      e.stopPropagation();
       busy(e.target, async () => {
-        await api(`${state.ws}/sources/${row.dataset.id}/admit`, { method: 'POST' });
+        await api(`${state.ws}/sources/${wrap.dataset.id}/admit`, { method: 'POST' });
         toast('Admitted into the extraction pool.');
         render();
-      }),
-    );
+      });
+    });
+    const toggle = async () => {
+      const open = row.getAttribute('aria-expanded') === 'true';
+      if (open) { row.setAttribute('aria-expanded', 'false'); drawer.hidden = true; return; }
+      row.setAttribute('aria-expanded', 'true');
+      drawer.hidden = false;
+      if (!drawer.dataset.loaded) {
+        drawer.innerHTML = '<div class="corpus-passages-loading">loading passages…</div>';
+        try {
+          const detail = await api(`${state.ws}/sources/${wrap.dataset.id}`);
+          drawer.innerHTML = drawerHtml(detail);
+          drawer.dataset.loaded = '1';
+        } catch (err) {
+          drawer.innerHTML = `<div class="corpus-passages-loading">${esc(err.message)}</div>`;
+        }
+      }
+    };
+    row.addEventListener('click', (e) => { if (e.target.closest('button')) return; toggle(); });
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
   });
+}
+
+/** Render a grounded Query answer — deliberately distinct from a publishable draft: this is a
+ *  read/lookup surface, not consent-cleared copy. Coverage gap when nothing grounded. */
+function renderQueryResult(out, r) {
+  if (r.gap || !r.answer) {
+    out.innerHTML = `<div class="query-gap"><span class="query-gap-mark">∅</span> The corpus doesn't support an answer to that. <span class="query-gap-why">Nothing here is grounded enough to say — try rephrasing, or add a source.</span></div>`;
+    return;
+  }
+  const receipts = r.claims
+    .map((c) => {
+      const chips = c.utteranceIds
+        .map((id) => { const u = r.passages.find((p) => p.id === id); return u ? chipHtml(u) : ''; })
+        .join('');
+      return `<div class="query-claim">
+        <p class="query-claim-text">${esc(c.sentence)}</p>
+        <div class="query-claim-span">“${esc(c.supportingSpan)}”</div>
+        <div class="chip-row">${chips}</div>
+      </div>`;
+    })
+    .join('');
+  out.innerHTML = `
+    <div class="query-answer-head"><span class="query-badge">corpus answer · read-only</span></div>
+    <div class="query-answer">${esc(r.answer)}</div>
+    <div class="section-label">Receipts — every sentence traced to a passage</div>
+    ${receipts}`;
 }
 
 /* ---------- shell ---------- */
@@ -1023,6 +1128,7 @@ $('#weave-go').addEventListener('click', (e) => {
   try {
     workspaces = await api('workspaces');
     state.templates = await api('templates').catch(() => []);
+    state.serverFlags = (await api('config').catch(() => ({}))).flags || {};
   } catch (e) {
     $('#view').innerHTML = `<div class="empty">Can't reach the workbench server.<div class="hint">${esc(e.message)} — is <code>npm run ui</code> running?</div></div>`;
     return;

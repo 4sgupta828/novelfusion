@@ -190,6 +190,135 @@ export function getUtterancesByIds(workspaceId: string, ids: string[]): (Utteran
   return rows.map(rowToUtterance);
 }
 
+/** THE retrieval isolation choke-point (panel-mandated). Every candidate id from any
+ *  retrieval leg (FTS, dense cosine) becomes passage text ONLY through this call. It is
+ *  workspace-scoped, so a foreign-workspace id simply vanishes from the result (fail-safe:
+ *  a leak becomes a silently-dropped candidate). Unlike getUtterancesByIds it preserves the
+ *  CALLER's id order (retrieval rank), not seq order. Also used by the span-gate to refetch a
+ *  cited passage — it must never fetch by bare id across workspaces (cross-tenant false-pass). */
+export function getUtterancesByIdsOrdered(workspaceId: string, ids: string[]): (Utterance & { workspaceId: string })[] {
+  const byId = new Map(getUtterancesByIds(workspaceId, ids).map((u) => [u.id, u]));
+  const out: (Utterance & { workspaceId: string })[] = [];
+  for (const id of ids) {
+    const u = byId.get(id);
+    if (u) out.push(u); // foreign / unknown ids drop out here
+  }
+  return out;
+}
+
+// ---------- source blobs (original-bytes retention for download) ----------
+
+export interface SourceBlob {
+  sourceId: string;
+  workspaceId: string;
+  filename: string;
+  mime: string;
+  size: number;
+  bytes: Buffer;
+}
+
+export function insertSourceBlob(b: SourceBlob): void {
+  getDb()
+    .prepare(
+      `INSERT INTO source_blobs (source_id, workspace_id, filename, mime, size, bytes)
+       VALUES (@sourceId, @workspaceId, @filename, @mime, @size, @bytes)
+       ON CONFLICT(source_id) DO UPDATE SET
+         filename = excluded.filename, mime = excluded.mime, size = excluded.size, bytes = excluded.bytes`,
+    )
+    .run(b as unknown as Record<string, unknown>);
+}
+
+/** Workspace-scoped fetch — never returns another workspace's blob even on a colliding id. */
+export function getSourceBlob(workspaceId: string, sourceId: string): SourceBlob | null {
+  const r = getDb()
+    .prepare('SELECT source_id, workspace_id, filename, mime, size, bytes FROM source_blobs WHERE workspace_id = ? AND source_id = ?')
+    .get(workspaceId, sourceId) as Record<string, unknown> | undefined;
+  if (!r) return null;
+  return {
+    sourceId: r.source_id as string,
+    workspaceId: r.workspace_id as string,
+    filename: r.filename as string,
+    mime: r.mime as string,
+    size: r.size as number,
+    bytes: r.bytes as Buffer,
+  };
+}
+
+// ---------- FTS lexical leg (NON-PORTABLE; isolated here) ----------
+
+/** Populate/refresh the FTS row for a passage. Called from the flag-gated retrieval
+ *  backfill only — NOT from ingest and NOT via a trigger (a trigger would fire with the
+ *  flag OFF, breaking Rule 20's byte-identical OFF path). */
+export function ftsUpsertPassages(rows: { id: string; workspaceId: string; text: string }[]): void {
+  const del = getDb().prepare('DELETE FROM passage_fts WHERE utterance_id = ?');
+  const ins = getDb().prepare('INSERT INTO passage_fts (utterance_id, workspace_id, text) VALUES (?, ?, ?)');
+  const tx = getDb().transaction((items: typeof rows) => {
+    for (const r of items) { del.run(r.id); ins.run(r.id, r.workspaceId, r.text); }
+  });
+  tx(rows);
+}
+
+export function ftsIndexedIds(workspaceId: string): Set<string> {
+  const rows = getDb().prepare('SELECT utterance_id FROM passage_fts WHERE workspace_id = ?').all(workspaceId) as { utterance_id: string }[];
+  return new Set(rows.map((r) => r.utterance_id));
+}
+
+/** BM25 recall leg. Returns utterance ids best-match-first, workspace- AND admitted-scoped.
+ *  Query is tokenized to a safe OR-of-terms MATCH (recall only — the LLM owns meaning). */
+export function ftsSearch(workspaceId: string, query: string, limit: number): string[] {
+  const terms = query.match(/[\p{L}\p{N}]+/gu);
+  if (!terms || terms.length === 0) return [];
+  const match = terms.map((t) => `"${t}"`).join(' OR ');
+  const rows = getDb()
+    .prepare(
+      `SELECT f.utterance_id AS id FROM passage_fts f
+       JOIN utterances u ON u.id = f.utterance_id
+       JOIN sources s ON s.id = u.source_id
+       WHERE f.workspace_id = ? AND s.admitted = 1 AND passage_fts MATCH ?
+       ORDER BY bm25(passage_fts) LIMIT ?`,
+    )
+    .all(workspaceId, match, limit) as { id: string }[];
+  return rows.map((r) => r.id);
+}
+
+// ---------- dense embeddings sidecar ----------
+
+export function upsertEmbedding(row: { utteranceId: string; workspaceId: string; model: string; dim: number; vec: Float32Array }): void {
+  getDb()
+    .prepare(
+      `INSERT INTO passage_embeddings (utterance_id, workspace_id, model, dim, vec)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(utterance_id) DO UPDATE SET model = excluded.model, dim = excluded.dim, vec = excluded.vec`,
+    )
+    .run(row.utteranceId, row.workspaceId, row.model, row.dim, Buffer.from(row.vec.buffer, row.vec.byteOffset, row.vec.byteLength));
+}
+
+/** Admitted, not-yet-embedded (for the current model) passages in a workspace. */
+export function listUnembeddedUtterances(workspaceId: string, model: string): { id: string; text: string; workspaceId: string }[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT u.id, u.text, u.workspace_id FROM utterances u
+       JOIN sources s ON s.id = u.source_id
+       WHERE u.workspace_id = ? AND s.admitted = 1
+         AND NOT EXISTS (SELECT 1 FROM passage_embeddings e WHERE e.utterance_id = u.id AND e.model = ?)`,
+    )
+    .all(workspaceId, model) as Record<string, unknown>[];
+  return rows.map((r) => ({ id: r.id as string, text: r.text as string, workspaceId: r.workspace_id as string }));
+}
+
+/** Load a workspace's dense vectors for one embedding space (model+dim). The dense leg
+ *  scans these in JS; the WHERE is the isolation + space guard. */
+export function loadEmbeddings(workspaceId: string, model: string, dim: number): { id: string; vec: Float32Array }[] {
+  const rows = getDb()
+    .prepare('SELECT utterance_id AS id, vec FROM passage_embeddings WHERE workspace_id = ? AND model = ? AND dim = ?')
+    .all(workspaceId, model, dim) as { id: string; vec: Buffer }[];
+  return rows.map((r) => {
+    const b = r.vec;
+    const ab = b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); // aligned copy
+    return { id: r.id, vec: new Float32Array(ab) };
+  });
+}
+
 /** Counterfactual results are per-RUN evidence: a fresh ratification run replaces
  *  prior rows so "latest blast radius" is truly the latest run, never cumulative
  *  history (panel finding: cumulative rows let repeated runs dilute or

@@ -20,5 +20,12 @@ export const config = {
   holdoutFraction: 0.3,
   flags: {
     confidenceRouting: flag('NF_FLAG_CONFIDENCE_ROUTING'), // Rule 20: default OFF
+    // Corpus hybrid retrieval + grounded Query (embeddings, FTS, answer-with-receipts).
+    // Default OFF (Rule 20): when off, ingest is byte-identical, no OpenAI call, no Query route.
+    corpusQuery: flag('NF_FLAG_CORPUS_QUERY'),
+    // Retain original uploaded bytes so a source can be downloaded. Default ON because it is an
+    // explicitly-requested product feature, but kept behind a flag so raw-PII retention is
+    // killable in one step (flip NF_FLAG_RETAIN_ORIGINALS=false to stop retaining + hide download).
+    retainOriginals: flag('NF_FLAG_RETAIN_ORIGINALS', true),
   },
 };

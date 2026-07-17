@@ -59,6 +59,8 @@ npm run build               # tsc → dist/
 # Pipeline CLI — `npm run nf -- --workspace <id> <cmd>` (needs ANTHROPIC_API_KEY for LLM stages)
 npm run nf -- --workspace w1 init                # create local SQLite DB (data/novelfusion.db)
 npm run nf -- --workspace w1 ingest <file...>    # transcripts → sources/utterances
+npm run nf -- --workspace w1 embed               # backfill embeddings + FTS (corpus retrieval; needs OPENAI_API_KEY)
+npm run nf -- --workspace w1 query "<question>"  # hybrid retrieval + grounded answer w/ receipts (flag NF_FLAG_CORPUS_QUERY, LLM+OpenAI)
 npm run nf -- --workspace w1 extract             # utterances → ranked moments (LLM)
 npm run nf -- --workspace w1 slate               # today's slate
 npm run nf -- --workspace w1 stubs <momentId>    # weaving stage 1 (LLM)
@@ -87,6 +89,16 @@ npm run nf -- --workspace w1 report              # Phase 0 gate metrics vs. thre
   critique-and-revise pass) → `edits` (capture; exemplar store) → `distill` (edits → scoped
   candidate principles with contrast sets) → `counterfactual` (regenerate holdout under a
   candidate; diff; blast radius).
+- **Corpus retrieval** (`src/pipeline/retrieval.ts`, flag `NF_FLAG_CORPUS_QUERY`, default OFF):
+  research-system-style hybrid — BM25 (SQLite FTS5) + dense (OpenAI `text-embedding-3-small`,
+  sidecar `passage_embeddings`) recall legs, fused by RRF. "Retrieval finds, grounding judges":
+  legs return `{id,score}` only; ids become passage text ONLY through the workspace-scoped
+  choke-point `getUtterancesByIdsOrdered` (a forgotten leg filter degrades to a dropped
+  candidate, never a cross-workspace leak). The grounded answer is built per-claim and gated
+  HARD/fail-closed: deterministic span-gate (`grounding.ts`, NFKC+difflib) + numeric-token gate
+  + a **different-family (OpenAI) faithfulness judge**; zero survivors → a coverage gap, never a
+  fabrication. Embeddings/FTS backfill idempotently and NEVER hard-fail ingest. FTS5 is
+  non-portable — isolated behind `ftsSearch`/`ftsUpsertPassages` for the Phase-1 pgvector rewrite.
 - **Eval harness** (`src/eval/`): edit-recurrence, compliance judge, regression churn. Built
   first, on purpose — **ratification is gated on counterfactual diffs from this harness.**
 - **Domain invariants** (violating any of these is a bug, not a judgment call):
