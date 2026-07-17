@@ -4,7 +4,7 @@
 
 import { z } from 'zod/v4';
 import { structured } from '../llm/client.js';
-import { insertMoment, listUtterances, newId } from '../db/index.js';
+import { insertMoment, listUtterances, newId, existingMomentKeys, momentKey } from '../db/index.js';
 import type { Moment, Utterance } from '../domain/types.js';
 
 const MomentSchema = z.object({
@@ -75,13 +75,20 @@ function segLine(u: Utterance & { sourceTitle?: string }): string {
   return `[${tag}] ${u.id} | web${h}: ${u.text}`;
 }
 
-export async function extractMoments(workspaceId: string): Promise<Moment[]> {
+export async function extractMoments(workspaceId: string): Promise<{ created: Moment[]; skipped: number }> {
   // Extraction reads only ADMITTED sources (ingest quarantine — a pending doc never
   // reaches the pipeline until a human admits it). Per-source order preserves context.
   const utterances = listUtterances(workspaceId, undefined, { admittedOnly: true });
   if (utterances.length === 0) throw new Error(`No admitted sources in workspace ${workspaceId} — ingest and admit sources first.`);
 
+  // Re-extract is dedup-on-write: extraction re-mines the whole admitted corpus each run, but a
+  // moment whose utterance-id set already exists (in ANY state — including rejected) is not
+  // re-inserted. So re-running after a new doc adds only genuinely new moments and never
+  // resurrects a killed one. Limitation (Rule 9): a re-run that groups the same utterances
+  // slightly differently yields a distinct key, so near-duplicate groupings can still slip through.
+  const seen = existingMomentKeys(workspaceId);
   const created: Moment[] = [];
+  let skipped = 0;
   for (const chunk of chunkUtterances(utterances)) {
     const validIds = new Set(chunk.map((u) => u.id));
     const input = chunk.map(segLine).join('\n');
@@ -97,6 +104,9 @@ export async function extractMoments(workspaceId: string): Promise<Moment[]> {
       // Code owns structure: reject hallucinated utterance IDs outright (fail safe).
       const ids = m.utteranceIds.filter((id) => validIds.has(id));
       if (ids.length === 0) continue;
+      const key = momentKey(ids);
+      if (seen.has(key)) { skipped++; continue; } // already extracted (any state) — never duplicate
+      seen.add(key);
       const moment: Moment = {
         id: newId('mom'),
         workspaceId,
@@ -111,5 +121,5 @@ export async function extractMoments(workspaceId: string): Promise<Moment[]> {
       created.push(moment);
     }
   }
-  return created;
+  return { created, skipped };
 }

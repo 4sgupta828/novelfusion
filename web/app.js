@@ -295,18 +295,17 @@ async function renderSlate(view, stale) {
   clampSel(moments.length);
   setBudget(moments.length * 4);
   if (moments.length === 0) {
-    view.innerHTML = `<div class="empty">The slate is clear.<div class="hint">Ingest a transcript and run Extract to mine new moments.</div></div>
+    view.innerHTML = `<div class="empty">The slate is clear.<div class="hint">Ingest a source and extract to mine new moments — or re-extract to pick up newly added corpus docs.</div></div>
       <div style="text-align:center"><button class="primary" id="extract-btn">Extract moments</button></div>`;
-    $('#extract-btn', view)?.addEventListener('click', (e) =>
-      busy(e.target, async () => {
-        const created = await api(`${state.ws}/extract`, { method: 'POST' });
-        toast(`${created.length} moment(s) extracted`);
-        render();
-      }),
-    );
+    $('#extract-btn', view)?.addEventListener('click', (e) => extractAndRender(e.target));
     return;
   }
-  view.innerHTML = moments
+  view.innerHTML =
+    `<div class="slate-toolbar">
+       <span class="slate-toolbar-note">Added corpus docs? Re-extract to mine them — already-extracted moments are skipped.</span>
+       <button class="secondary" id="reextract-btn" title="Re-mine the admitted corpus (dedup-on-write)">↻ Re-extract</button>
+     </div>` +
+    moments
     .map(
       (m, i) => `
     <article class="card ${i === state.sel ? 'selected' : ''}" data-idx="${i}" data-id="${esc(m.id)}" aria-current="${i === state.sel}">
@@ -341,6 +340,25 @@ async function renderSlate(view, stale) {
       state.sel = i;
       updateSelection(view);
     });
+  });
+
+  $('#reextract-btn', view)?.addEventListener('click', (e) => extractAndRender(e.target));
+}
+
+/** Run extraction (dedup-on-write) and refresh, with an honest new/skipped toast. */
+async function extractAndRender(btn) {
+  return busy(btn, async () => {
+    const r = await api(`${state.ws}/extract`, { method: 'POST' });
+    const created = r.created?.length ?? 0;
+    const skipped = r.skipped ?? 0;
+    toast(
+      created > 0
+        ? `${created} new moment${created === 1 ? '' : 's'}${skipped ? ` · ${skipped} already extracted` : ''}`
+        : skipped
+          ? `No new moments — ${skipped} already extracted`
+          : 'No moments found in the admitted corpus',
+    );
+    render();
   });
 }
 

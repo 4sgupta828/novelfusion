@@ -362,6 +362,19 @@ export function listMoments(workspaceId: string, state?: string, limit = 50): Mo
   return rows.map(rowToMoment);
 }
 
+/** Canonical dedup keys for every existing moment in a workspace (any state, so a rejected
+ *  moment is never resurrected by a re-extract). Key = sorted utterance-id set — a STRUCTURAL
+ *  identity (code owns structure, Rule 18), not a claim-text match. */
+export function existingMomentKeys(workspaceId: string): Set<string> {
+  const rows = getDb().prepare('SELECT utterance_ids FROM moments WHERE workspace_id = ?').all(workspaceId) as { utterance_ids: string }[];
+  return new Set(rows.map((r) => momentKey(JSON.parse(r.utterance_ids) as string[])));
+}
+
+/** The structural identity of a moment: its utterance-id set, order-independent. */
+export function momentKey(utteranceIds: string[]): string {
+  return [...utteranceIds].sort().join('|');
+}
+
 export function getMoment(workspaceId: string, id: string): Moment | null {
   const r = getDb().prepare('SELECT * FROM moments WHERE workspace_id = ? AND id = ?').get(workspaceId, id) as
     | Record<string, unknown>

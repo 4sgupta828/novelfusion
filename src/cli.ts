@@ -132,9 +132,9 @@ program
   .description('extract ranked moments from ingested utterances (LLM)')
   .action(async function (this: Command) {
     const workspaceId = ws(this);
-    const moments = await extractMoments(workspaceId);
-    console.log(`extracted ${moments.length} moment(s)`);
-    for (const m of moments.slice(0, 10)) {
+    const { created, skipped } = await extractMoments(workspaceId);
+    console.log(`extracted ${created.length} new moment(s)${skipped ? `, skipped ${skipped} already-extracted` : ''}`);
+    for (const m of created.slice(0, 10)) {
       console.log(`  ${m.id}  [${m.score.toFixed(2)}] ${m.claim.slice(0, 90)}`);
     }
   });
