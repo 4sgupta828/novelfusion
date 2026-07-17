@@ -399,6 +399,8 @@ async function renderDrafts(view, stale) {
   if (state.detail?.kind === 'draft') return renderDraftDetail(view, state.detail.id, stale);
   const drafts = await api(`${state.ws}/drafts`);
   if (stale()) return;
+  // Finished (templated) drafts first; freeform/in-progress sink below.
+  drafts.sort((a, b) => (a.template && a.template !== 'freeform' ? 0 : 1) - (b.template && b.template !== 'freeform' ? 0 : 1));
   clampSel(drafts.length);
   if (drafts.length === 0) {
     view.innerHTML = `<div class="empty">No drafts yet.<div class="hint">Weave a moment from the slate.</div></div>`;
@@ -410,7 +412,7 @@ async function renderDrafts(view, stale) {
     <button class="list-row ${i === state.sel ? 'selected' : ''}" data-idx="${i}" data-id="${esc(d.id)}">
       <span>
         <span class="title">${esc(preview(d.content))}</span><br/>
-        <span class="sub">${esc(fmtLabel(d.format))} · rules v${d.constitutionVersion}${d.holdout ? ' · holdout' : ''}</span>
+        <span class="sub">${esc(fmtLabel(d.format))}${d.template && d.template !== 'freeform' ? ` · ${esc(TEMPLATE_LABEL[d.template] ?? d.template)}` : ''}${d.figureCount ? ` · ▦ ${d.figureCount} figure${d.figureCount === 1 ? '' : 's'}` : ''}${d.holdout ? ' · holdout' : ''}</span>
       </span>
       <span class="pills">
         <span class="pill ${STATE_CLASS[d.state] ?? 'neutral'}">${esc(STATE_LABEL[d.state] ?? d.state)}</span>

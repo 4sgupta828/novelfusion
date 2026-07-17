@@ -120,6 +120,7 @@ app.get('/api/:ws/drafts', wrap((req, res) => {
   const drafts = listDrafts(ws).map((d) => ({
     ...d,
     editCount: allEdits.filter((e) => e.draftId === d.id).length,
+    figureCount: d.viz.length,
   }));
   res.json(drafts.reverse());
 }));
