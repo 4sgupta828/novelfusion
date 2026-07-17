@@ -1,0 +1,9 @@
+[00:00:12] Priya Sharma: Welcome everyone. Today we're talking about why most incident-response tooling fails the teams it's supposed to protect.
+[00:01:05] Priya Sharma: Here's the uncomfortable truth: we killed our SLA dashboard last quarter. Not because SLAs don't matter, but because the dashboard optimized the wrong fear. Teams were gaming acknowledgment time instead of actually fixing things faster.
+[00:02:10] Priya Sharma: When we replaced it with a single metric — time to verified fix — our real resolution times dropped 40 percent in two months. Nobody was pretending anymore.
+[00:03:22] Dev Okonkwo: That matches what we see with customers. Everyone instruments acknowledgment because it's easy, not because it's honest.
+[00:04:01] Dev Okonkwo: The pattern I'd call out: if a metric can be satisfied without the customer's problem being solved, it will be. Every time. That's not cynicism, that's incentive design.
+[00:05:15] Priya Sharma: Right. And the second thing we changed: on-call engineers now write the postmortem the same day, while it hurts. Waiting a week produces fiction. Same-day postmortems produce engineering.
+[00:06:40] Dev Okonkwo: One of our banking customers cut repeat incidents by a third doing exactly that. The discipline is brutal for the first month and then it becomes culture.
+[00:07:55] Priya Sharma: If you take one thing from this webinar: delete the metric your team is proudest of gaming. You know which one it is. Everyone knows which one it is.
+[00:09:03] Dev Okonkwo: And measure the thing that requires the customer to be actually okay. That's the whole trick. It's uncomfortable precisely because it's real.
