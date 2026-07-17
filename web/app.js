@@ -114,6 +114,11 @@ const TIER_LABEL = { L0_compliance: 'compliance', L1_brand: 'brand rule', L2_cha
 const STATE_LABEL = { draft: 'in edit', in_approval: 'awaiting approval', approved: 'approved', published: 'published', declined: 'declined' };
 const STATE_CLASS = { draft: 'in-edit', in_approval: 'candidate', approved: 'approved', published: 'published', declined: 'rejected' };
 const fmtLabel = (f) => FORMAT_LABEL[f] ?? f;
+/** Plain-text preview for list rows: strip markdown headings/emphasis, collapse whitespace. */
+const preview = (content, n = 76) => {
+  const t = content.replace(/^#+\s*/gm, '').replace(/[*_`>]/g, '').replace(/\s+/g, ' ').trim();
+  return t.slice(0, n) + (t.length > n ? '…' : '');
+};
 
 const REJECT_CHIPS = [
   ['not_our_pov', 'Not our POV'],
@@ -242,10 +247,10 @@ async function renderDrafts(view, stale) {
       (d, i) => `
     <button class="list-row ${i === state.sel ? 'selected' : ''}" data-idx="${i}" data-id="${esc(d.id)}">
       <span>
-        <span class="title">${esc(d.content.slice(0, 80))}${d.content.length > 80 ? '…' : ''}</span><br/>
+        <span class="title">${esc(preview(d.content))}</span><br/>
         <span class="sub">${esc(fmtLabel(d.format))} · rules v${d.constitutionVersion}${d.holdout ? ' · holdout' : ''}</span>
       </span>
-      <span>
+      <span class="pills">
         <span class="pill ${STATE_CLASS[d.state] ?? 'neutral'}">${esc(STATE_LABEL[d.state] ?? d.state)}</span>
         <span class="pill neutral">${d.editCount} edit${d.editCount === 1 ? '' : 's'}</span>
       </span>
