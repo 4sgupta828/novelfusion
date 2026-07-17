@@ -317,29 +317,25 @@ function decodeEntities(s: string): string {
     .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(Number(n)));
 }
 
-export async function ingestUrl(
+/** Persist a public web page as a source: kind 'webpage', consent 'public', provenance
+ *  'public_web', per-block webpage locators. Shared by manual URL ingest and Exa discovery.
+ *  The url MUST already be assertPublicUrl-validated by the caller. */
+export function insertWebpage(
   workspaceId: string,
-  rawUrl: string,
-  opts: { title?: string; admitted?: boolean } = {},
-): Promise<{ source: Source; segmentCount: number }> {
+  url: string,
+  title: string,
+  blocks: { heading: string | null; text: string }[],
+  opts: { admitted?: boolean } = {},
+): { source: Source; segmentCount: number } {
   ensureWorkspace(workspaceId);
-  const url = assertPublicUrl(rawUrl);
-  const res = await fetch(url.toString(), {
-    redirect: 'follow',
-    headers: { 'User-Agent': 'NovelFusion/0.1 (+content ingester)' },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error(`Fetch failed (${res.status}) for ${url}`);
-  const html = await res.text();
-  const { title, blocks } = extractReadable(html);
   if (blocks.length === 0) throw new Error(`No readable text extracted from ${url}`);
   const fetchedAt = new Date().toISOString();
   const source: Source = {
     id: newId('src'),
     workspaceId,
     kind: 'webpage',
-    uri: url.toString(),
-    title: opts.title ?? title ?? url.hostname,
+    uri: url,
+    title: title || new URL(url).hostname,
     recordedAt: null,
     consentBasis: 'public',
     admitted: opts.admitted ?? true,
@@ -354,9 +350,26 @@ export async function ingestUrl(
     tEndSec: null,
     text: b.text,
     seq: i,
-    locator: { kind: 'webpage', url: url.toString(), anchor: b.heading ?? undefined, fetchedAt },
+    locator: { kind: 'webpage', url, anchor: b.heading ?? undefined, fetchedAt },
     provenanceClass: 'public_web',
   }));
   insertUtterances(rows);
   return { source, segmentCount: rows.length };
+}
+
+export async function ingestUrl(
+  workspaceId: string,
+  rawUrl: string,
+  opts: { title?: string; admitted?: boolean } = {},
+): Promise<{ source: Source; segmentCount: number }> {
+  const url = assertPublicUrl(rawUrl);
+  const res = await fetch(url.toString(), {
+    redirect: 'follow',
+    headers: { 'User-Agent': 'NovelFusion/0.1 (+content ingester)' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`Fetch failed (${res.status}) for ${url}`);
+  const html = await res.text();
+  const { title, blocks } = extractReadable(html);
+  return insertWebpage(workspaceId, url.toString(), opts.title ?? title ?? url.hostname, blocks, { admitted: opts.admitted });
 }

@@ -908,6 +908,17 @@ async function renderCorpus(view, stale) {
       <div id="query-result" class="query-result" hidden></div>`
     : '';
 
+  const discoverBox = state.serverFlags?.sourceDiscovery
+    ? `<form class="corpus-discover" id="discover-form">
+        <span class="corpus-form-label">◎ Discover sources on the web</span>
+        <div class="corpus-form-row">
+          <input type="text" id="discover-topic" placeholder="A topic or angle, e.g. “regulatory lag in electric rate cases”" aria-label="Discovery topic" autocomplete="off" />
+          <button class="secondary" type="submit">Discover</button>
+        </div>
+        <span class="corpus-form-hint">Neural web search (Exa). Results land <strong>quarantined</strong> — review and Admit the good ones before they enter the pipeline.</span>
+      </form>`
+    : '';
+
   view.innerHTML = `
     <div class="corpus-intro">
       <p class="corpus-lede">Everything this workspace can draw from. Drop documents, paste text, or add a public URL — each becomes provenance-linked passages the pipeline cites as receipts. <strong class="corpus-boundary">Scoped to this workspace only.</strong></p>
@@ -942,6 +953,8 @@ async function renderCorpus(view, stale) {
         </form>
       </div>
     </div>
+
+    ${discoverBox}
 
     <div class="corpus-list-head">
       <span class="section-label" style="margin:0">Sources</span>
@@ -1062,6 +1075,22 @@ function wireCorpus(view) {
     busy(e.submitter, async () => {
       const r = await api(`${state.ws}/ingest-doc`, { method: 'POST', body: { text, title: title || undefined } });
       toast(`Added — ${r.segmentCount ?? '?'} passage${r.segmentCount === 1 ? '' : 's'}`);
+      render();
+    });
+  });
+
+  // Discover sources (flag-gated) — Exa web search → quarantined sources pending review.
+  $('#discover-form', view)?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const topic = $('#discover-topic', view).value.trim();
+    if (topic.length < 3) return void toast('Give a fuller topic (3+ characters).', true);
+    busy(e.submitter, async () => {
+      const r = await api(`${state.ws}/discover`, { method: 'POST', body: { topic } });
+      toast(
+        r.created.length > 0
+          ? `${r.created.length} source${r.created.length === 1 ? '' : 's'} discovered → quarantine${r.skipped ? ` · ${r.skipped} skipped` : ''}. Review & Admit below.`
+          : `No new sources found${r.skipped ? ` (${r.skipped} were dupes/unreadable)` : ''}.`,
+      );
       render();
     });
   });

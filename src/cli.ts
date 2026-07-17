@@ -24,6 +24,7 @@ import { clusterPrinciples } from './pipeline/clusters.js';
 import { ingestFile, ingestDocument, ingestUrl } from './pipeline/ingest.js';
 import { extractMoments } from './pipeline/moments.js';
 import { embedBackfill, answerQuery } from './pipeline/retrieval.js';
+import { discoverSources } from './pipeline/discover.js';
 import { proposeStubs, weaveDraft } from './pipeline/weave.js';
 import { captureEdit } from './pipeline/edits.js';
 import { distill } from './pipeline/distill.js';
@@ -101,6 +102,18 @@ program
   .action(function (this: Command, sourceId: string) {
     admitSource(ws(this), sourceId);
     console.log(`admitted ${sourceId}`);
+  });
+
+program
+  .command('discover')
+  .argument('<topic...>', 'topic/angle to find supporting web sources for')
+  .description('auto-discover public web sources via Exa → quarantine (needs EXA_API_KEY; flag NF_FLAG_SOURCE_DISCOVERY)')
+  .action(async function (this: Command, topic: string[]) {
+    if (!config.flags.sourceDiscovery) throw new Error('source discovery is disabled — set NF_FLAG_SOURCE_DISCOVERY=true.');
+    const r = await discoverSources(ws(this), topic.join(' '));
+    console.log(`queries${r.expanded ? ' (LLM-expanded)' : ' (raw topic — LLM unavailable)'}: ${r.queries.map((q) => `"${q}"`).join(', ')}`);
+    console.log(`discovered ${r.created.length} new source(s) → quarantine${r.skipped ? `, skipped ${r.skipped} (dupes/unreadable)` : ''}. Admit the good ones.`);
+    for (const s of r.created) console.log(`  ${s.id}  ${s.title} — ${s.url} (${s.segmentCount} passages)`);
   });
 
 program

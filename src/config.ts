@@ -27,5 +27,8 @@ export const config = {
     // explicitly-requested product feature, but kept behind a flag so raw-PII retention is
     // killable in one step (flip NF_FLAG_RETAIN_ORIGINALS=false to stop retaining + hide download).
     retainOriginals: flag('NF_FLAG_RETAIN_ORIGINALS', true),
+    // Auto-discover public web sources via Exa (results land quarantined, pending review).
+    // Default OFF (Rule 20); needs EXA_API_KEY. New external-network path (Rule 15).
+    sourceDiscovery: flag('NF_FLAG_SOURCE_DISCOVERY'),
   },
 };

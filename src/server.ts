@@ -36,6 +36,7 @@ import {
   clusterMemberCounts,
 } from './db/index.js';
 import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
+import { discoverSources } from './pipeline/discover.js';
 import { clusterPrinciples } from './pipeline/clusters.js';
 import { captureEditContent } from './pipeline/edits.js';
 import { assertPrincipleTransition } from './domain/lifecycle.js';
@@ -130,7 +131,7 @@ app.get('/api/templates', wrap((_req, res) => {
 
 // Client-visible feature flags (drives conditional UI: Query box, download affordance).
 app.get('/api/config', wrap((_req, res) => {
-  res.json({ flags: { corpusQuery: config.flags.corpusQuery, retainOriginals: config.flags.retainOriginals } });
+  res.json({ flags: { corpusQuery: config.flags.corpusQuery, retainOriginals: config.flags.retainOriginals, sourceDiscovery: config.flags.sourceDiscovery } });
 }));
 
 app.get('/api/:ws/slate', wrap((req, res) => {
@@ -331,6 +332,14 @@ app.post('/api/:ws/ingest-doc', wrap((req, res) => {
   const { title, text } = req.body ?? {};
   if (typeof text !== 'string' || text.trim().length < 24) throw new Error('doc text is required (min 24 chars)');
   res.json(ingestDocumentText(param(req, 'ws'), text, { title, admitted: req.body?.pending !== true }));
+}));
+
+// Auto-discover public web sources via Exa (flag-gated). Results land QUARANTINED, pending review.
+app.post('/api/:ws/discover', wrap(async (req, res) => {
+  if (!config.flags.sourceDiscovery) return void res.status(404).json({ error: 'source discovery is disabled (flag NF_FLAG_SOURCE_DISCOVERY off)' });
+  const topic = req.body?.topic;
+  if (typeof topic !== 'string' || topic.trim().length < 3) throw new Error('topic is required (min 3 chars)');
+  res.json(await discoverSources(param(req, 'ws'), topic.trim()));
 }));
 
 app.post('/api/:ws/sources/:id/admit', wrap((req, res) => {
