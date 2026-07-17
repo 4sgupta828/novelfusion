@@ -112,13 +112,14 @@ program
   .argument('<momentId>')
   .option('--format <format>', 'li_post | x_thread | blog | clip_spec', 'li_post')
   .option('--angle <angle>', 'editorial angle', 'default')
+  .option('--template <id>', 'freeform | exec_brief | pyramid | data_drop', 'freeform')
   .option('--holdout', 'force this draft into the eval holdout set')
   .description('weave a full draft (LLM, constitution-conditioned)')
-  .action(async function (this: Command, momentId: string, opts: { format: AssetFormat; angle: string; holdout?: boolean }) {
-    const draft = await weaveDraft(ws(this), momentId, opts.format, opts.angle, { holdout: opts.holdout });
-    console.log(`draft ${draft.id} (holdout=${draft.holdout}, constitution v${draft.constitutionVersion})\n`);
+  .action(async function (this: Command, momentId: string, opts: { format: AssetFormat; angle: string; template: string; holdout?: boolean }) {
+    const draft = await weaveDraft(ws(this), momentId, opts.format, opts.angle, { holdout: opts.holdout, template: opts.template });
+    console.log(`draft ${draft.id} (template=${draft.template}, holdout=${draft.holdout}, constitution v${draft.constitutionVersion})\n`);
     console.log(draft.content);
-    console.log(`\nprovenance: ${draft.provenance.length} claim span(s) grounded`);
+    console.log(`\nprovenance: ${draft.provenance.length} claim span(s) · ${draft.sections.length} section(s) · ${draft.viz.length} figure(s)`);
   });
 
 program

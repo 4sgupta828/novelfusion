@@ -83,6 +83,23 @@
     <form method="dialog"><button class="primary">Close</button></form>
   </dialog>
 
+  <dialog id="weave-dialog" aria-labelledby="weave-title">
+    <h2 id="weave-title">Weave this moment</h2>
+    <p class="weave-lede">Choose how to frame it. The template shapes the piece into intent-framed sections; charts appear where the source has real numbers.</p>
+    <div class="weave-field">
+      <span class="ws-label">Format</span>
+      <div id="weave-formats" class="choice-row"></div>
+    </div>
+    <div class="weave-field">
+      <span class="ws-label">Template</span>
+      <div id="weave-templates" class="template-list"></div>
+    </div>
+    <div class="weave-actions">
+      <button class="secondary" id="weave-cancel">Cancel</button>
+      <button class="primary" id="weave-go">Weave draft</button>
+    </div>
+  </dialog>
+
   <script src="app.js"></script>
 </body>
 </html>

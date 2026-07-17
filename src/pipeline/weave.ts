@@ -18,6 +18,7 @@ import {
   updateMomentState,
 } from '../db/index.js';
 import type { AssetFormat, Draft, Principle, Utterance, WeaveStub } from '../domain/types.js';
+import { getTemplate, type ContentTemplate } from '../domain/templates.js';
 
 const StubSchema = z.object({
   stubs: z.array(
@@ -30,8 +31,33 @@ const StubSchema = z.object({
   ),
 });
 
+const VizSchema = z.object({
+  kind: z.enum(['bar', 'pie', 'line', 'table', 'stat']),
+  title: z.string(),
+  caption: z.string().describe('One line: what the figure shows and why it matters'),
+  unit: z.string().nullable().describe("Unit for values, e.g. '$', '%', 'min' — null if none"),
+  afterSection: z.string().nullable().describe('Section key to render this figure after (null = end)'),
+  series: z
+    .array(z.object({ label: z.string(), value: z.number() }))
+    .nullable()
+    .describe('For bar/pie/line/stat: labeled numeric values. null for table.'),
+  table: z
+    .object({ columns: z.array(z.string()), rows: z.array(z.array(z.string())) })
+    .nullable()
+    .describe('For table kind: header + data rows. null otherwise.'),
+  utteranceIds: z.array(z.string()).describe('Source utterance IDs (verbatim) the FIGURES came from'),
+});
+
 const DraftSchema = z.object({
-  content: z.string().describe('The complete asset, ready to publish'),
+  content: z.string().describe('The full asset as plain text/markdown (all sections concatenated). Ready to publish.'),
+  sections: z
+    .array(z.object({ key: z.string(), title: z.string(), body: z.string() }))
+    .nullable()
+    .describe('One entry per template section, in order. null for freeform.'),
+  viz: z
+    .array(VizSchema)
+    .nullable()
+    .describe('Charts/tables — ONLY where the source contains real quantitative data that a figure clarifies. Empty/null if none warranted; never fabricate numbers.'),
   provenance: z.array(
     z.object({
       quote: z.string().describe('A claim-bearing span of the draft'),
@@ -117,15 +143,37 @@ function exemplarBlock(workspaceId: string): string {
   );
 }
 
+function templateBlock(template: ContentTemplate): string {
+  if (!template.sections) {
+    return '';
+  }
+  const keys = template.sections.map((s) => s.key).join(', ');
+  return (
+    `\n\nTEMPLATE — "${template.name}". Structure the piece as these ordered sections (return them in "sections", ` +
+    `one entry per section with its key, a short display title, and the body). Also concatenate them into "content" ` +
+    `as the full publishable text. Section keys and their editorial intent:\n` +
+    template.sections.map((s) => `- ${s.key} (${s.title}): ${s.intent}`).join('\n') +
+    `\nUse exactly these section keys: ${keys}. For a short format (li_post, x_thread), you may fold weaker sections ` +
+    `together but keep the strongest 3–4 moves.`
+  );
+}
+
+const VIZ_GUIDANCE = `\n\nFIGURES — emit charts/tables ONLY when the source contains real quantitative data a figure genuinely clarifies (a ratio, a breakdown, a before/after, a trend, a headline number). Rules:
+- Never fabricate or estimate numbers. Every value must come from the source utterances; put those utterance IDs in the figure's utteranceIds.
+- Pick the form by the data's job: 'bar' to compare magnitudes across categories, 'pie' for parts of a whole (2–5 slices), 'line' for change over time, 'table' for a small labeled matrix, 'stat' for a single headline number.
+- Set afterSection to the section key the figure supports. Give every figure a title and a one-line caption.
+- Prefer at most 1–2 figures. If the source has no hard numbers, return an empty figures list — a figure with no real data is worse than none.`;
+
 export async function weaveDraft(
   workspaceId: string,
   momentId: string,
   format: AssetFormat,
   angle = 'default',
-  opts: { holdout?: boolean; withConstitution?: boolean } = {},
+  opts: { holdout?: boolean; withConstitution?: boolean; template?: string } = {},
 ): Promise<Draft> {
   const moment = getMoment(workspaceId, momentId);
   if (!moment) throw new Error(`Moment ${momentId} not found in workspace ${workspaceId}`);
+  const template = getTemplate(opts.template);
   const cited = getUtterancesByIds(workspaceId, moment.utteranceIds);
   const citedIds = new Set(cited.map((u) => u.id));
   // Give the writer the surrounding argument, all of it citable (receipts still resolve).
@@ -144,10 +192,13 @@ export async function weaveDraft(
     stage: 'weave-draft',
     system: draftSystem(active),
     user:
-      `Write this asset: ${FORMAT_SPECS[format]}\nAngle: ${angle}\nCentral moment (the piece's thesis): ${moment.claim}\n\n` +
-      `Source transcript (★ = the utterances the moment cites; unstarred lines are surrounding context from the same recordings — ALL lines are citable):\n${src}` +
+      `Write this asset: ${FORMAT_SPECS[format]}\nAngle: ${angle}\nCentral moment (the piece's thesis): ${moment.claim}` +
+      templateBlock(template) +
+      VIZ_GUIDANCE +
+      `\n\nSource transcript (★ = the utterances the moment cites; unstarred lines are surrounding context from the same recordings — ALL lines are citable):\n${src}` +
       (useConstitution ? exemplarBlock(workspaceId) : ''),
     schema: DraftSchema,
+    maxTokens: 20000,
   });
 
   // Critique-and-revise pass against the same principles (CAI-style application).
@@ -166,13 +217,33 @@ export async function weaveDraft(
     .map((p) => ({ quote: p.quote, utteranceIds: p.utteranceIds.filter((id) => validIds.has(id)) }))
     .filter((p) => p.utteranceIds.length > 0);
 
+  // Structure keeps only sections whose keys the template declared; figures keep
+  // only provenance IDs that resolve (same discipline as text provenance).
+  const templateKeys = new Set(template.sections?.map((s) => s.key) ?? []);
+  const sections = (result.sections ?? []).filter((s) => templateKeys.size === 0 || templateKeys.has(s.key));
+  const viz = (result.viz ?? [])
+    .filter(vizHasData)
+    .map((v) => ({
+      kind: v.kind,
+      title: v.title,
+      caption: v.caption,
+      unit: v.unit ?? undefined,
+      afterSection: v.afterSection ?? undefined,
+      series: v.series ?? undefined,
+      table: v.table ?? undefined,
+      utteranceIds: v.utteranceIds.filter((id) => validIds.has(id)),
+    }));
+
   const draft: Draft = {
     id: newId('drf'),
     workspaceId,
     momentId,
     format,
     angle,
+    template: template.id,
     content,
+    sections,
+    viz,
     provenance,
     constitutionVersion: constitutionVersion(workspaceId),
     holdout: opts.holdout ?? Math.random() < config.holdoutFraction,
@@ -182,4 +253,12 @@ export async function weaveDraft(
   insertDraft(draft);
   updateMomentState(workspaceId, momentId, 'woven');
   return draft;
+}
+
+/** Code owns structure: drop a figure that carries no usable data (Rule 18 —
+ *  the model decides IF a figure is warranted; code enforces that it isn't empty). */
+function vizHasData(v: { series?: unknown; table?: { rows?: unknown[] } | null }): boolean {
+  if (Array.isArray(v.series) && v.series.length > 0) return true;
+  if (v.table && Array.isArray(v.table.rows) && v.table.rows.length > 0) return true;
+  return false;
 }

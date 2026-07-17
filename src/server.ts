@@ -28,6 +28,7 @@ import { proposeStubs, weaveDraft } from './pipeline/weave.js';
 import { extractMoments } from './pipeline/moments.js';
 import { gateReport } from './report/gate.js';
 import { listCounterfactuals } from './db/index.js';
+import { TEMPLATES } from './domain/templates.js';
 import type { AssetFormat, EditReasonChip, RejectionChip } from './domain/types.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -90,6 +91,10 @@ const wrap = (fn: Handler): express.RequestHandler => async (req, res) => {
 app.get('/api/workspaces', wrap((_req, res) => {
   const rows = getDb().prepare('SELECT id, name FROM workspaces ORDER BY created_at').all();
   res.json(rows);
+}));
+
+app.get('/api/templates', wrap((_req, res) => {
+  res.json(TEMPLATES.map((t) => ({ id: t.id, name: t.name, blurb: t.blurb, sections: t.sections })));
 }));
 
 app.get('/api/:ws/slate', wrap((req, res) => {
@@ -217,7 +222,8 @@ app.post('/api/:ws/moments/:id/stubs', wrap(async (req, res) => {
 app.post('/api/:ws/moments/:id/weave', wrap(async (req, res) => {
   const format = oneOf<AssetFormat>(req.body?.format, FORMATS, 'format');
   const angle = typeof req.body?.angle === 'string' ? req.body.angle : 'default';
-  res.json(await weaveDraft(param(req, 'ws'), param(req, 'id'), format, angle));
+  const template = typeof req.body?.template === 'string' ? req.body.template : 'freeform';
+  res.json(await weaveDraft(param(req, 'ws'), param(req, 'id'), format, angle, { template }));
 }));
 
 app.post('/api/:ws/distill', wrap(async (req, res) => {

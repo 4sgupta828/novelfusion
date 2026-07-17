@@ -50,7 +50,10 @@ CREATE TABLE IF NOT EXISTS drafts (
   moment_id TEXT NOT NULL REFERENCES moments(id),
   format TEXT NOT NULL,
   angle TEXT NOT NULL,
+  template TEXT NOT NULL DEFAULT 'freeform',
   content TEXT NOT NULL,
+  sections TEXT NOT NULL DEFAULT '[]',   -- JSON DraftSection[]
+  viz TEXT NOT NULL DEFAULT '[]',        -- JSON VizSpec[]
   provenance TEXT NOT NULL,             -- JSON ProvenanceEntry[]
   constitution_version INTEGER NOT NULL DEFAULT 0,
   holdout INTEGER NOT NULL DEFAULT 0,   -- Rule 5: holdouts excluded from exemplars/distillation

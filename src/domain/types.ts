@@ -80,13 +80,46 @@ export interface ProvenanceEntry {
   utteranceIds: string[];
 }
 
+/** One intent-framed section of a templated draft. */
+export interface DraftSection {
+  key: string;
+  title: string;
+  body: string;
+}
+
+export type VizKind = 'bar' | 'pie' | 'line' | 'table' | 'stat';
+
+/** A chart the model emits when the source data warrants it. Numbers carry
+ *  receipts too (utteranceIds) — the "every claim has a source" invariant
+ *  extends to figures, not just prose. */
+export interface VizSpec {
+  kind: VizKind;
+  title: string;
+  caption: string;
+  unit?: string;
+  /** Section key after which to render this figure (falls back to end). */
+  afterSection?: string;
+  /** bar / pie / line / stat: labeled values. */
+  series?: { label: string; value: number }[];
+  /** table: header row + data rows. */
+  table?: { columns: string[]; rows: string[][] };
+  /** Provenance: the utterances the figures came from. */
+  utteranceIds: string[];
+}
+
 export interface Draft {
   id: string;
   workspaceId: string;
   momentId: string;
   format: AssetFormat;
   angle: string;
+  /** Template id used to structure the piece ('freeform' = none). */
+  template: string;
   content: string;
+  /** Structured sections when a template was used (empty for freeform). */
+  sections: DraftSection[];
+  /** Charts/tables the model emitted (empty when none warranted). */
+  viz: VizSpec[];
   provenance: ProvenanceEntry[];
   constitutionVersion: number;
   /** true → excluded from exemplar retrieval and distillation (Rule 5: eval holdout). */

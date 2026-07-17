@@ -28,7 +28,22 @@ export function getDb(): Database.Database {
   db.pragma('foreign_keys = ON');
   const schema = fs.readFileSync(path.join(here, 'schema.sql'), 'utf-8');
   db.exec(schema);
+  migrate(db);
   return db;
+}
+
+/** Additive column migrations for DBs created before a column existed.
+ *  Idempotent — checks table_info before each ALTER (SQLite can't ADD IF NOT EXISTS). */
+function migrate(d: Database.Database): void {
+  const cols = new Set((d.prepare('PRAGMA table_info(drafts)').all() as { name: string }[]).map((r) => r.name));
+  const add: [string, string][] = [
+    ['template', "TEXT NOT NULL DEFAULT 'freeform'"],
+    ['sections', "TEXT NOT NULL DEFAULT '[]'"],
+    ['viz', "TEXT NOT NULL DEFAULT '[]'"],
+  ];
+  for (const [name, def] of add) {
+    if (!cols.has(name)) d.exec(`ALTER TABLE drafts ADD COLUMN ${name} ${def}`);
+  }
 }
 
 export const newId = (prefix: string) => `${prefix}_${randomUUID().slice(0, 12)}`;
@@ -166,12 +181,13 @@ export function updateMomentState(workspaceId: string, id: string, state: string
 export function insertDraft(d: Draft): void {
   getDb()
     .prepare(
-      `INSERT INTO drafts (id, workspace_id, moment_id, format, angle, content, provenance, constitution_version, holdout, state, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO drafts (id, workspace_id, moment_id, format, angle, template, content, sections, viz, provenance, constitution_version, holdout, state, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
-      d.id, d.workspaceId, d.momentId, d.format, d.angle, d.content,
-      JSON.stringify(d.provenance), d.constitutionVersion, d.holdout ? 1 : 0, d.state, d.createdAt,
+      d.id, d.workspaceId, d.momentId, d.format, d.angle, d.template, d.content,
+      JSON.stringify(d.sections), JSON.stringify(d.viz), JSON.stringify(d.provenance),
+      d.constitutionVersion, d.holdout ? 1 : 0, d.state, d.createdAt,
     );
 }
 
@@ -182,7 +198,10 @@ function rowToDraft(r: Record<string, unknown>): Draft {
     momentId: r.moment_id as string,
     format: r.format as Draft['format'],
     angle: r.angle as string,
+    template: (r.template as string) ?? 'freeform',
     content: r.content as string,
+    sections: JSON.parse((r.sections as string) ?? '[]'),
+    viz: JSON.parse((r.viz as string) ?? '[]'),
     provenance: JSON.parse(r.provenance as string),
     constitutionVersion: r.constitution_version as number,
     holdout: (r.holdout as number) === 1,

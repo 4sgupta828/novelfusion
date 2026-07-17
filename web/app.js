@@ -107,9 +107,137 @@ function diffHtml(diffText) {
   return `<div class="diff">${lines.join('')}</div>`;
 }
 
+/* ---------- figures: inline SVG charts, theme-aware, direct-labeled ---------- */
+// Palette validated via the dataviz skill (4-slot categorical passes CVD + vision
+// gates; light-contrast WARN is discharged by direct labels on every mark).
+
+function fmtVal(v, unit) {
+  const n = Math.abs(v) >= 1000 ? v.toLocaleString('en-US') : String(Math.round(v * 100) / 100);
+  if (unit === '$') return `$${n}`;
+  if (unit === '%') return `${n}%`;
+  if (unit && unit !== 'x') return `${n} ${unit}`;
+  if (unit === 'x') return `${n}×`;
+  return n;
+}
+const seriesColor = (i, single) => (single ? 'var(--pencil)' : `var(--viz-${(i % 4) + 1})`);
+
+function barSvg(series, unit) {
+  const max = Math.max(...series.map((s) => s.value), 0) || 1;
+  const rh = 30, gap = 12, padL = 4, w = 560;
+  const barX = 150, barW = w - barX - 70;
+  const h = series.length * (rh + gap);
+  const single = series.length === 1;
+  const rows = series
+    .map((s, i) => {
+      const y = i * (rh + gap);
+      const fw = Math.max(2, (s.value / max) * barW);
+      return `
+      <text x="${barX - 10}" y="${y + rh / 2}" text-anchor="end" dominant-baseline="central" class="viz-cat">${esc(s.label)}</text>
+      <rect x="${barX}" y="${y}" width="${barW}" height="${rh}" rx="5" class="viz-track"/>
+      <rect x="${barX}" y="${y}" width="${fw}" height="${rh}" rx="5" fill="${seriesColor(i, single)}"><title>${esc(s.label)}: ${esc(fmtVal(s.value, unit))}</title></rect>
+      <text x="${barX + fw + 8}" y="${y + rh / 2}" dominant-baseline="central" class="viz-val">${esc(fmtVal(s.value, unit))}</text>`;
+    })
+    .join('');
+  return `<svg viewBox="0 0 ${w} ${h}" class="viz-svg" role="img" preserveAspectRatio="xMinYMin meet" style="margin-left:${padL}px">${rows}</svg>`;
+}
+
+function pieSvg(series, unit) {
+  const total = series.reduce((a, s) => a + s.value, 0) || 1;
+  const cx = 90, cy = 90, r = 78, ir = 46;
+  let acc = -Math.PI / 2;
+  const arc = (start, end, i) => {
+    const large = end - start > Math.PI ? 1 : 0;
+    const p = (ang, rad) => `${cx + Math.cos(ang) * rad} ${cy + Math.sin(ang) * rad}`;
+    return `<path d="M ${p(start, r)} A ${r} ${r} 0 ${large} 1 ${p(end, r)} L ${p(end, ir)} A ${ir} ${ir} 0 ${large} 0 ${p(start, ir)} Z" fill="${seriesColor(i, false)}" class="viz-slice"><title>${esc(series[i].label)}: ${esc(fmtVal(series[i].value, unit))}</title></path>`;
+  };
+  const slices = series
+    .map((s, i) => {
+      const start = acc;
+      const end = acc + (s.value / total) * Math.PI * 2;
+      acc = end;
+      return arc(start, end, i);
+    })
+    .join('');
+  const legend = series
+    .map(
+      (s, i) =>
+        `<div class="viz-legend-row"><span class="viz-swatch" style="background:${seriesColor(i, false)}"></span><span class="viz-cat">${esc(s.label)}</span><span class="viz-val">${esc(fmtVal(s.value, unit))}</span></div>`,
+    )
+    .join('');
+  return `<div class="viz-pie"><svg viewBox="0 0 180 180" class="viz-svg" role="img" width="180" height="180">${slices}</svg><div class="viz-legend">${legend}</div></div>`;
+}
+
+function lineSvg(series, unit) {
+  const w = 560, h = 200, padL = 46, padR = 20, padT = 16, padB = 30;
+  const max = Math.max(...series.map((s) => s.value)), min = Math.min(...series.map((s) => s.value), 0);
+  const span = max - min || 1;
+  const px = (i) => padL + (i / Math.max(1, series.length - 1)) * (w - padL - padR);
+  const py = (v) => padT + (1 - (v - min) / span) * (h - padT - padB);
+  const pts = series.map((s, i) => `${px(i)},${py(s.value)}`).join(' ');
+  const area = `${padL},${py(min)} ${pts} ${px(series.length - 1)},${py(min)}`;
+  const dots = series
+    .map((s, i) => `<circle cx="${px(i)}" cy="${py(s.value)}" r="4.5" fill="var(--pencil)"><title>${esc(s.label)}: ${esc(fmtVal(s.value, unit))}</title></circle>`)
+    .join('');
+  const xlabels = series.map((s, i) => `<text x="${px(i)}" y="${h - 8}" text-anchor="middle" class="viz-axis">${esc(s.label)}</text>`).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" class="viz-svg" role="img" preserveAspectRatio="xMinYMin meet">
+    <line x1="${padL}" y1="${py(min)}" x2="${w - padR}" y2="${py(min)}" class="viz-grid"/>
+    <text x="${padL - 8}" y="${py(max)}" text-anchor="end" dominant-baseline="central" class="viz-axis">${esc(fmtVal(max, unit))}</text>
+    <polygon points="${area}" class="viz-area"/>
+    <polyline points="${pts}" fill="none" stroke="var(--pencil)" stroke-width="2" stroke-linejoin="round"/>
+    ${dots}${xlabels}</svg>`;
+}
+
+function tableHtml(t) {
+  return `<table class="viz-table"><thead><tr>${t.columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+    <tbody>${t.rows.map((r) => `<tr>${r.map((c, i) => `<td class="${i === 0 ? '' : 'num'}">${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+function statHtml(series, unit) {
+  const s = series[0];
+  return `<div class="viz-stat"><div class="viz-stat-num">${esc(fmtVal(s.value, unit))}</div><div class="viz-stat-lbl">${esc(s.label)}</div></div>`;
+}
+
+function figureHtml(v, utterances) {
+  let body = '';
+  if (v.kind === 'bar') body = barSvg(v.series, v.unit);
+  else if (v.kind === 'pie') body = pieSvg(v.series, v.unit);
+  else if (v.kind === 'line') body = lineSvg(v.series, v.unit);
+  else if (v.kind === 'table' && v.table) body = tableHtml(v.table);
+  else if (v.kind === 'stat') body = statHtml(v.series, v.unit);
+  const chips = (v.utteranceIds || [])
+    .map((id) => utterances.find((u) => u.id === id))
+    .filter(Boolean)
+    .map(chipHtml)
+    .join('');
+  return `<figure class="figure">
+    <figcaption class="figure-title">${esc(v.title)}</figcaption>
+    <div class="figure-body">${body}</div>
+    ${v.caption ? `<p class="figure-caption">${esc(v.caption)}</p>` : ''}
+    ${chips ? `<div class="chip-row figure-source">${chips}</div>` : ''}
+  </figure>`;
+}
+
+/** Render a templated draft: intent-framed sections interleaved with their figures. */
+function structuredDraftHtml(d) {
+  const vizFor = (key) => d.viz.filter((v) => v.afterSection === key).map((v) => figureHtml(v, d.utterances)).join('');
+  const placed = new Set(d.viz.filter((v) => v.afterSection).map((v) => v.afterSection));
+  const sections = d.sections
+    .map(
+      (s) => `<section class="draft-section">
+        <h3 class="draft-section-title">${esc(s.title)}</h3>
+        <div class="draft-section-body">${esc(s.body)}</div>
+        ${vizFor(s.key)}
+      </section>`,
+    )
+    .join('');
+  const trailing = d.viz.filter((v) => !v.afterSection || !placed.has(v.afterSection)).map((v) => figureHtml(v, d.utterances)).join('');
+  return `<div class="draft-structured">${sections}${trailing}</div>`;
+}
+
 /* ---------- views ---------- */
 
 const FORMAT_LABEL = { li_post: 'LinkedIn', x_thread: 'X thread', blog: 'Blog', clip_spec: 'Clip spec' };
+const TEMPLATE_LABEL = { freeform: 'Freeform', exec_brief: 'Executive brief', pyramid: 'Pyramid synthesis', data_drop: 'Data drop' };
 const TIER_LABEL = { L0_compliance: 'compliance', L1_brand: 'brand rule', L2_channel: 'channel rule', L3_taste: 'taste' };
 const STATE_LABEL = { draft: 'in edit', in_approval: 'awaiting approval', approved: 'approved', published: 'published', declined: 'declined' };
 const STATE_CLASS = { draft: 'in-edit', in_approval: 'candidate', approved: 'approved', published: 'published', declined: 'rejected' };
@@ -176,7 +304,7 @@ async function renderSlate(view, stale) {
   moments.forEach((m, i) => {
     const card = $(`[data-idx="${i}"]`, view);
     wireChips(card, m.utterances);
-    $('.act-weave', card).addEventListener('click', (e) => weaveMoment(m.id, e.target.closest('button')));
+    $('.act-weave', card).addEventListener('click', (e) => weaveMoment(m.id));
     $$('.chip-picker button[data-chip]', card).forEach((b) =>
       b.addEventListener('click', () => rejectMoment(m.id, b.dataset.chip)),
     );
@@ -225,12 +353,46 @@ async function rejectMoment(id, chip) {
   }
 }
 
-async function weaveMoment(id, btn) {
+const WEAVE_FORMATS = [
+  ['li_post', 'LinkedIn post'],
+  ['blog', 'Blog post'],
+  ['x_thread', 'X thread'],
+  ['clip_spec', 'Clip spec'],
+];
+
+function openWeaveDialog(momentId) {
+  const dlg = $('#weave-dialog');
+  const templates = state.templates || [];
+  dlg.querySelector('#weave-formats').innerHTML = WEAVE_FORMATS.map(
+    ([k, label], i) => `<label class="choice"><input type="radio" name="wformat" value="${k}" ${i === 0 ? 'checked' : ''}/> ${label}</label>`,
+  ).join('');
+  dlg.querySelector('#weave-templates').innerHTML = templates
+    .map(
+      (t, i) => `<label class="template-choice">
+        <input type="radio" name="wtemplate" value="${esc(t.id)}" ${i === 0 ? 'checked' : ''}/>
+        <span class="template-choice-body">
+          <span class="template-choice-name">${esc(t.name)}</span>
+          <span class="template-choice-blurb">${esc(t.blurb)}</span>
+          ${t.sections ? `<span class="template-choice-secs">${t.sections.map((s) => esc(s.title)).join(' · ')}</span>` : ''}
+        </span>
+      </label>`,
+    )
+    .join('');
+  dlg.dataset.moment = momentId;
+  dlg.showModal();
+}
+
+async function doWeave(momentId, format, template, btn) {
   await busy(btn, async () => {
-    const draft = await api(`${state.ws}/moments/${id}/weave`, { method: 'POST', body: { format: 'li_post' } });
-    toast(`Draft ${draft.id} woven`);
+    const draft = await api(`${state.ws}/moments/${momentId}/weave`, { method: 'POST', body: { format, template } });
+    $('#weave-dialog').close();
+    toast(`Draft woven — ${TEMPLATE_LABEL[template] ?? template}, ${FORMAT_LABEL[format] ?? format}`);
     switchView('drafts', { detail: { kind: 'draft', id: draft.id } });
   });
+}
+
+function weaveMoment(id) {
+  openWeaveDialog(id);
 }
 
 async function renderDrafts(view, stale) {
@@ -275,9 +437,10 @@ async function renderDraftDetail(view, id, stale) {
       <span class="pill ${STATE_CLASS[d.state] ?? 'neutral'}">${esc(STATE_LABEL[d.state] ?? d.state)}</span>
       <span class="pill neutral">${esc(fmtLabel(d.format))}</span>
       <span class="pill neutral">rules v${d.constitutionVersion}</span>
+      ${d.template && d.template !== 'freeform' ? `<span class="pill neutral">${esc(TEMPLATE_LABEL[d.template] ?? d.template)}</span>` : ''}
       ${d.holdout ? '<span class="pill shadow" title="Reserved for evaluation — never used as training signal">holdout</span>' : ''}
     </div>
-    <div class="draft-content" id="draft-content">${esc(d.content)}</div>
+    <div class="draft-content" id="draft-content">${(d.sections && d.sections.length) || (d.viz && d.viz.length) ? structuredDraftHtml(d) : esc(d.content)}</div>
     <div class="card-actions" style="margin-top:14px">
       <button class="primary" id="edit-btn">Edit this draft</button>
     </div>
@@ -556,7 +719,7 @@ function switchView(name, opts = {}) {
 /* ---------- keyboard grammar ---------- */
 
 document.addEventListener('keydown', (e) => {
-  if (e.target.matches('input, textarea, select') || $('#help').open) {
+  if (e.target.matches('input, textarea, select') || $('#help').open || $('#weave-dialog').open) {
     if (e.key === 'Escape') e.target.blur();
     return;
   }
@@ -639,10 +802,21 @@ $('#ws-select').addEventListener('change', (e) => {
   switchView(state.view);
 });
 
+// Weave dialog wiring
+$('#weave-cancel').addEventListener('click', () => $('#weave-dialog').close());
+$('#weave-go').addEventListener('click', (e) => {
+  const dlg = $('#weave-dialog');
+  const format = dlg.querySelector('input[name="wformat"]:checked')?.value || 'li_post';
+  const template = dlg.querySelector('input[name="wtemplate"]:checked')?.value || 'freeform';
+  const momentId = dlg.dataset.moment;
+  doWeave(momentId, format, template, e.target.closest('button'));
+});
+
 (async function boot() {
   let workspaces;
   try {
     workspaces = await api('workspaces');
+    state.templates = await api('templates').catch(() => []);
   } catch (e) {
     $('#view').innerHTML = `<div class="empty">Can't reach the workbench server.<div class="hint">${esc(e.message)} — is <code>npm run ui</code> running?</div></div>`;
     return;
