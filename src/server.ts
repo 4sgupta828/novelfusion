@@ -37,6 +37,7 @@ import {
 } from './db/index.js';
 import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
 import { discoverSources } from './pipeline/discover.js';
+import { kickBackfill, startBackfillWorker } from './pipeline/backfill.js';
 import { clusterPrinciples } from './pipeline/clusters.js';
 import { captureEditContent } from './pipeline/edits.js';
 import { assertPrincipleTransition } from './domain/lifecycle.js';
@@ -319,19 +320,26 @@ app.post('/api/:ws/ingest-file', upload.array('files', 20), wrap(async (req, res
     }
     results.push({ id: r.source.id, title: r.source.title, kind: r.source.kind, segmentCount: r.segmentCount });
   }
+  kickBackfill(ws); // eager background embed/index of the newly-admitted passages (no-op if retrieval off)
   res.json(results);
 }));
 
 app.post('/api/:ws/ingest-url', wrap(async (req, res) => {
   const url = req.body?.url;
   if (typeof url !== 'string' || !url.trim()) throw new Error('url is required');
-  res.json(await ingestUrl(param(req, 'ws'), url.trim(), { admitted: req.body?.pending !== true }));
+  const ws = param(req, 'ws');
+  const out = await ingestUrl(ws, url.trim(), { admitted: req.body?.pending !== true });
+  kickBackfill(ws);
+  res.json(out);
 }));
 
 app.post('/api/:ws/ingest-doc', wrap((req, res) => {
   const { title, text } = req.body ?? {};
   if (typeof text !== 'string' || text.trim().length < 24) throw new Error('doc text is required (min 24 chars)');
-  res.json(ingestDocumentText(param(req, 'ws'), text, { title, admitted: req.body?.pending !== true }));
+  const ws = param(req, 'ws');
+  const out = ingestDocumentText(ws, text, { title, admitted: req.body?.pending !== true });
+  kickBackfill(ws);
+  res.json(out);
 }));
 
 // Auto-discover public web sources via Exa (flag-gated). Results land QUARANTINED, pending review.
@@ -343,7 +351,9 @@ app.post('/api/:ws/discover', wrap(async (req, res) => {
 }));
 
 app.post('/api/:ws/sources/:id/admit', wrap((req, res) => {
-  admitSource(param(req, 'ws'), param(req, 'id'));
+  const ws = param(req, 'ws');
+  admitSource(ws, param(req, 'id'));
+  kickBackfill(ws); // admitting makes its passages retrieval-eligible — embed/index them now, in the background
   res.json({ ok: true });
 }));
 
@@ -435,4 +445,7 @@ app.post('/api/:ws/principles/:id/ratify', wrap(async (req, res) => {
 
 app.listen(port, '127.0.0.1', () => {
   console.log(`NovelFusion workbench → http://localhost:${port}  (db: ${config.dbPath})`);
+  // Eager background embed/FTS backfill (self-healing sweep). Inert unless retrieval is on.
+  startBackfillWorker();
+  if (config.flags.corpusQuery && process.env.OPENAI_API_KEY) console.log('  ↳ background backfill worker active (embeds admitted passages eagerly)');
 });

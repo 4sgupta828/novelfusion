@@ -89,6 +89,10 @@ export function ensureWorkspace(id: string, name?: string): void {
     .run(id, name ?? id);
 }
 
+export function listWorkspaceIds(): string[] {
+  return (getDb().prepare('SELECT id FROM workspaces').all() as { id: string }[]).map((r) => r.id);
+}
+
 // ---------- sources & utterances ----------
 
 export function insertSource(s: Source): void {
