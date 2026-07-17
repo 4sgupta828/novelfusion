@@ -13,10 +13,11 @@ import {
   insertDraft,
   listEdits,
   listPrinciples,
+  listUtterances,
   newId,
   updateMomentState,
 } from '../db/index.js';
-import type { AssetFormat, Draft, Principle, WeaveStub } from '../domain/types.js';
+import type { AssetFormat, Draft, Principle, Utterance, WeaveStub } from '../domain/types.js';
 
 const StubSchema = z.object({
   stubs: z.array(
@@ -77,6 +78,35 @@ function inScope(p: Principle, format: AssetFormat): boolean {
   return p.scope.channel === null || p.scope.channel === format;
 }
 
+/** Per-format depth + structure specs. Without these, the grounding rule plus a
+ *  tiny source window converges every draft to a compressed restatement. */
+const FORMAT_SPECS: Record<AssetFormat, string> = {
+  li_post:
+    'A LinkedIn post of 600–1,300 characters. Structure: a hook line that earns the "see more" click, a concrete body that develops the argument with the evidence and at least one specific number or example from the source, and a sharp closing line. Short paragraphs (1–2 sentences). No hashtags.',
+  blog:
+    'A complete blog post of 700–1,100 words in markdown: an H1 title, a 2–3 sentence opening that states the thesis, 3–5 H2 sections that develop the argument with the concrete numbers, stories, and methodology from the source material, and a closing section with a direct takeaway. Use the surrounding context to develop the full argument — not just the headline claim.',
+  x_thread:
+    'An X thread of 6–10 numbered tweets ("1/", "2/", …), each under 280 characters. Tweet 1 is the hook with the strongest concrete fact; the middle develops the argument one idea per tweet; the last tweet is the takeaway. No hashtags.',
+  clip_spec:
+    'A video clip specification: IN/OUT timestamps from the source utterance timing, a cut plan (timestamp ranges with what is said), 2–4 burned captions that are VERBATIM quotes from the transcript (never paraphrased), aspect ratios, and a CTA card line.',
+};
+
+/** Surrounding transcript context: ±N utterances around each cited utterance,
+ *  from the same source. All of it is citable — this is what lets a blog draw on
+ *  the full argument (methodology, examples, follow-ups) instead of starving the
+ *  writer with the 1–2 lines the moment happens to cite. */
+function expandContext(workspaceId: string, cited: Utterance[], window = 4): Utterance[] {
+  const bySource = new Map<string, Utterance[]>();
+  const out = new Map<string, Utterance>();
+  for (const u of cited) {
+    if (!bySource.has(u.sourceId)) bySource.set(u.sourceId, listUtterances(workspaceId, u.sourceId));
+    for (const n of bySource.get(u.sourceId)!) {
+      if (Math.abs(n.seq - u.seq) <= window) out.set(n.id, n);
+    }
+  }
+  return [...out.values()].sort((a, b) => (a.sourceId === b.sourceId ? a.seq - b.seq : a.sourceId.localeCompare(b.sourceId)));
+}
+
 /** Exemplars: recent NON-HOLDOUT edits, most recent first (the floor under distillation). */
 function exemplarBlock(workspaceId: string): string {
   const edits = listEdits(workspaceId, { holdout: false }).slice(-config.maxExemplars);
@@ -96,9 +126,14 @@ export async function weaveDraft(
 ): Promise<Draft> {
   const moment = getMoment(workspaceId, momentId);
   if (!moment) throw new Error(`Moment ${momentId} not found in workspace ${workspaceId}`);
-  const utterances = getUtterancesByIds(workspaceId, moment.utteranceIds);
-  const validIds = new Set(utterances.map((u) => u.id));
-  const src = utterances.map((u) => `${u.id} | ${u.speaker}: ${u.text}`).join('\n');
+  const cited = getUtterancesByIds(workspaceId, moment.utteranceIds);
+  const citedIds = new Set(cited.map((u) => u.id));
+  // Give the writer the surrounding argument, all of it citable (receipts still resolve).
+  const context = expandContext(workspaceId, cited);
+  const validIds = new Set(context.map((u) => u.id));
+  const src = context
+    .map((u) => `${citedIds.has(u.id) ? '★' : ' '} ${u.id} | ${u.speaker}${u.tStartSec != null ? ` @${u.tStartSec}s` : ''}: ${u.text}`)
+    .join('\n');
 
   const useConstitution = opts.withConstitution ?? true;
   const active = useConstitution
@@ -109,8 +144,8 @@ export async function weaveDraft(
     stage: 'weave-draft',
     system: draftSystem(active),
     user:
-      `Write a ${format} asset.\nAngle: ${angle}\nMoment claim: ${moment.claim}\n\n` +
-      `Source utterances (format: utteranceId | speaker: text):\n${src}` +
+      `Write this asset: ${FORMAT_SPECS[format]}\nAngle: ${angle}\nCentral moment (the piece's thesis): ${moment.claim}\n\n` +
+      `Source transcript (★ = the utterances the moment cites; unstarred lines are surrounding context from the same recordings — ALL lines are citable):\n${src}` +
       (useConstitution ? exemplarBlock(workspaceId) : ''),
     schema: DraftSchema,
   });
