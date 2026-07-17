@@ -38,6 +38,8 @@ export interface Utterance {
   tEndSec: number | null;
   text: string;
   seq: number;
+  /** Joined from sources for display (provenance chips show source + speaker + time). */
+  sourceTitle?: string;
 }
 
 export interface RiskFlag {

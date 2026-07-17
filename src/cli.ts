@@ -10,6 +10,7 @@ import {
   ensureWorkspace,
   getDb,
   getDraft,
+  getPrinciple,
   listMoments,
   listPrinciples,
   updateMomentState,
@@ -23,6 +24,7 @@ import { distill } from './pipeline/distill.js';
 import { latestBlastRadius, runCounterfactual } from './pipeline/counterfactual.js';
 import { runRecurrenceEval } from './eval/harness.js';
 import { renderGateReport } from './report/gate.js';
+import { assertPrincipleTransition } from './domain/lifecycle.js';
 import type { AssetFormat, EditReasonChip, RejectionChip } from './domain/types.js';
 
 const program = new Command();
@@ -181,6 +183,9 @@ program
   .description('accept a candidate → SHADOW (never straight to active)')
   .action(function (this: Command, principleId: string) {
     const workspaceId = ws(this);
+    const principle = getPrinciple(workspaceId, principleId);
+    if (!principle) throw new Error(`Principle ${principleId} not found.`);
+    assertPrincipleTransition(principle.status, 'accept');
     const blast = latestBlastRadius(workspaceId, principleId);
     if (blast.inScopeTotal + blast.outOfScopeTotal === 0) {
       throw new Error('No counterfactual run for this principle — `nf ratify --principle <id>` first. Ratification is gated on diffs.');
@@ -197,7 +202,11 @@ program
   .argument('<principleId>')
   .description('promote a shadow principle → ACTIVE')
   .action(function (this: Command, principleId: string) {
-    updatePrincipleStatus(ws(this), principleId, 'active');
+    const workspaceId = ws(this);
+    const principle = getPrinciple(workspaceId, principleId);
+    if (!principle) throw new Error(`Principle ${principleId} not found.`);
+    assertPrincipleTransition(principle.status, 'promote');
+    updatePrincipleStatus(workspaceId, principleId, 'active');
     console.log(`${principleId} → active`);
   });
 
@@ -206,7 +215,11 @@ program
   .argument('<principleId>')
   .description('reject a candidate/shadow principle')
   .action(function (this: Command, principleId: string) {
-    updatePrincipleStatus(ws(this), principleId, 'rejected');
+    const workspaceId = ws(this);
+    const principle = getPrinciple(workspaceId, principleId);
+    if (!principle) throw new Error(`Principle ${principleId} not found.`);
+    assertPrincipleTransition(principle.status, 'reject');
+    updatePrincipleStatus(workspaceId, principleId, 'rejected');
     console.log(`${principleId} → rejected`);
   });
 

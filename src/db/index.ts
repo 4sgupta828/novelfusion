@@ -86,7 +86,11 @@ export function getUtterancesByIds(workspaceId: string, ids: string[]): (Utteran
   if (ids.length === 0) return [];
   const placeholders = ids.map(() => '?').join(',');
   const rows = getDb()
-    .prepare(`SELECT * FROM utterances WHERE workspace_id = ? AND id IN (${placeholders}) ORDER BY seq`)
+    .prepare(
+      `SELECT u.*, s.title AS source_title FROM utterances u
+       JOIN sources s ON s.id = u.source_id
+       WHERE u.workspace_id = ? AND u.id IN (${placeholders}) ORDER BY u.seq`,
+    )
     .all(workspaceId, ...ids) as Record<string, unknown>[];
   return rows.map((r) => ({
     id: r.id as string,
@@ -97,7 +101,18 @@ export function getUtterancesByIds(workspaceId: string, ids: string[]): (Utteran
     tEndSec: r.t_end_sec as number | null,
     text: r.text as string,
     seq: r.seq as number,
+    sourceTitle: r.source_title as string,
   }));
+}
+
+/** Counterfactual results are per-RUN evidence: a fresh ratification run replaces
+ *  prior rows so "latest blast radius" is truly the latest run, never cumulative
+ *  history (panel finding: cumulative rows let repeated runs dilute or
+ *  permanently block the accept gate). */
+export function deleteCounterfactuals(workspaceId: string, principleId: string): void {
+  getDb()
+    .prepare('DELETE FROM counterfactual_results WHERE workspace_id = ? AND principle_id = ?')
+    .run(workspaceId, principleId);
 }
 
 // ---------- moments ----------

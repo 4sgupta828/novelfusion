@@ -10,6 +10,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { generate } from '../llm/client.js';
 import {
+  deleteCounterfactuals,
   getPrinciple,
   insertCounterfactual,
   listCounterfactuals,
@@ -64,14 +65,23 @@ export async function runCounterfactual(
     const changed = materiallyChanged(d.content, revised);
     const diff = changed ? unifiedDiff(d.id, d.content, revised) : '';
     results.push({ draftId: d.id, inScope: principleInScope(principle, d), changed, diff });
+  }
+
+  // A ratification run REPLACES prior evidence for this principle — "latest blast
+  // radius" must mean this run, never an aggregate of historical runs (which would
+  // let re-runs dilute a bad radius or stale rows block a rescoped principle).
+  // Rows are written after all LLM calls complete so a mid-run failure leaves the
+  // previous run's evidence intact.
+  deleteCounterfactuals(workspaceId, principleId);
+  for (const r of results) {
     insertCounterfactual({
       id: newId('cfr'),
       workspaceId,
       principleId,
-      draftId: d.id,
-      inScope: principleInScope(principle, d),
-      changed,
-      diff,
+      draftId: r.draftId,
+      inScope: r.inScope,
+      changed: r.changed,
+      diff: r.diff,
     });
   }
 

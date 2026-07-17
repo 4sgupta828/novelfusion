@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NovelFusion — Workbench</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✎</text></svg>" />
+</head>
+<body>
+  <div class="app">
+    <nav class="rail" aria-label="Primary">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">✎</span>
+        <span class="brand-name">NovelFusion</span>
+        <span class="brand-phase">phase 0</span>
+      </div>
+
+      <div class="rail-nav" aria-label="Views">
+        <button class="rail-item" data-view="slate"><span>Slate</span><kbd>1</kbd></button>
+        <button class="rail-item" data-view="drafts"><span>Drafts</span><kbd>2</kbd></button>
+        <button class="rail-item" data-view="constitution"><span>Constitution</span><kbd>3</kbd></button>
+        <button class="rail-item" data-view="gate"><span>Gate</span><kbd>4</kbd></button>
+      </div>
+
+      <div class="rail-foot">
+        <label class="ws-label" for="ws-select">Workspace</label>
+        <select id="ws-select" aria-label="Workspace"></select>
+        <button id="theme-toggle" class="ghost" aria-label="Toggle theme" aria-pressed="false">◐ theme</button>
+        <p class="rail-hint">j/k move · x reject · w weave<br/>? all shortcuts</p>
+      </div>
+    </nav>
+
+    <main class="main" id="main">
+      <header class="topbar">
+        <h1 id="view-title">Slate</h1>
+        <div class="budget" id="budget" title="Attention budget — the system's promise: everything surfaced fits in it">
+          <span class="budget-label" id="budget-label">attention budget</span>
+          <span class="budget-bar"><span class="budget-fill" id="budget-fill"></span></span>
+        </div>
+      </header>
+      <div id="view" class="view" tabindex="-1"></div>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <dialog id="help">
+    <h2>Keyboard</h2>
+    <table class="kbd-table">
+      <tr><td><kbd>1</kbd>–<kbd>4</kbd></td><td>switch view</td></tr>
+      <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>next / previous card</td></tr>
+      <tr><td><kbd>enter</kbd></td><td>open selected</td></tr>
+      <tr><td><kbd>w</kbd></td><td>weave selected moment</td></tr>
+      <tr><td><kbd>x</kbd></td><td>reject selected (then <kbd>1</kbd>–<kbd>6</kbd> for reason)</td></tr>
+      <tr><td><kbd>.</kbd></td><td>expand judgment / receipts</td></tr>
+      <tr><td><kbd>esc</kbd></td><td>close / back</td></tr>
+    </table>
+    <form method="dialog"><button class="primary">Close</button></form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

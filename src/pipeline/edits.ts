@@ -12,9 +12,19 @@ export function captureEdit(
   editedFilePath: string,
   reasonChip: EditReasonChip | null,
 ): EditEvent {
+  return captureEditContent(workspaceId, draftId, fs.readFileSync(editedFilePath, 'utf-8'), reasonChip);
+}
+
+/** Same capture path for the web UI, where the edited content arrives as a string. */
+export function captureEditContent(
+  workspaceId: string,
+  draftId: string,
+  editedRaw: string,
+  reasonChip: EditReasonChip | null,
+): EditEvent {
   const draft = getDraft(workspaceId, draftId);
   if (!draft) throw new Error(`Draft ${draftId} not found in workspace ${workspaceId}`);
-  const edited = fs.readFileSync(editedFilePath, 'utf-8').trim();
+  const edited = editedRaw.trim();
   if (edited === draft.content.trim()) {
     throw new Error('Edited content is identical to the draft — nothing to capture.');
   }

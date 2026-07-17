@@ -11,17 +11,20 @@
     "nf": "node bin/nf.js",
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "test": "vitest run"
+    "test": "vitest run",
+    "ui": "tsx src/server.ts"
   },
   "engines": {
     "node": ">=20.10"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
+    "@types/express": "^5.0.6",
     "better-sqlite3": "^11.10.0",
     "commander": "^13.1.0",
     "diff": "^7.0.0",
     "dotenv": "^16.4.7",
+    "express": "^5.2.1",
     "zod": "^3.25.0"
   },
   "devDependencies": {
