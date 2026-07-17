@@ -589,6 +589,8 @@ document.addEventListener('keydown', (e) => {
 
 $$('.rail-item').forEach((b) => b.addEventListener('click', () => switchView(b.dataset.view)));
 
+$('#help-btn').addEventListener('click', () => $('#help').showModal());
+
 $('#theme-toggle').addEventListener('click', () => {
   const cur = document.documentElement.dataset.theme;
   const next = cur === 'dark' ? 'light' : cur === 'light' ? 'dark' : matchMedia('(prefers-color-scheme: dark)').matches ? 'light' : 'dark';

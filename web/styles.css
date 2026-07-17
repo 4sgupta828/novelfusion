@@ -297,7 +297,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 dialog {
   border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink);
-  padding: 22px 26px; box-shadow: var(--shadow); max-width: 420px;
+  padding: 22px 26px; box-shadow: var(--shadow); max-width: 560px; max-height: 85vh; overflow-y: auto;
 }
 dialog::backdrop { background: rgb(10 12 18 / 0.45); }
 dialog h2 { font-family: var(--serif); margin: 0 0 12px; font-size: 18px; }
@@ -325,3 +325,16 @@ dialog h2 { font-family: var(--serif); margin: 0 0 12px; font-size: 18px; }
 .reason-set { border: 0; padding: 0; margin: 10px 0; display: flex; gap: 12px; flex-wrap: wrap; }
 .reason-set legend { padding: 0 0 6px; }
 .chip-row { display: block; }
+
+/* ---------- help dialog / guide ---------- */
+.help-lede { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+.help-section { margin: 0 0 14px; }
+.help-section h3 { font-family: var(--serif); font-size: 15px; margin: 0 0 4px; display: flex; align-items: baseline; gap: 8px; }
+.help-num {
+  font-family: var(--mono); font-size: 11px; color: var(--pencil);
+  border: 1px solid var(--pencil); border-radius: 999px; width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+}
+.help-section p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink); }
+.help-loop { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px; }
+.help-kbd-title { font-family: var(--serif); font-size: 15px; margin: 14px 0 6px; }
