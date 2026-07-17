@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS sources (
   title TEXT NOT NULL,
   recorded_at TEXT,
   consent_basis TEXT NOT NULL,
+  admitted INTEGER NOT NULL DEFAULT 1,   -- ingest quarantine: 0 = pending review, excluded from extraction
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -23,11 +24,13 @@ CREATE TABLE IF NOT EXISTS utterances (
   id TEXT PRIMARY KEY,
   source_id TEXT NOT NULL REFERENCES sources(id),
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),
-  speaker TEXT NOT NULL,
+  speaker TEXT,                          -- null for non-transcript segments
   t_start_sec REAL,
   t_end_sec REAL,
   text TEXT NOT NULL,
-  seq INTEGER NOT NULL
+  seq INTEGER NOT NULL,
+  locator TEXT NOT NULL DEFAULT '{"kind":"transcript"}',   -- JSON Locator
+  provenance_class TEXT NOT NULL DEFAULT 'human_utterance'
 );
 CREATE INDEX IF NOT EXISTS idx_utterances_ws ON utterances(workspace_id, source_id, seq);
 

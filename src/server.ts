@@ -19,6 +19,7 @@ import {
   listPrinciples,
   updateMomentState,
   updatePrincipleStatus,
+  admitSource,
 } from './db/index.js';
 import { captureEditContent } from './pipeline/edits.js';
 import { assertPrincipleTransition } from './domain/lifecycle.js';
@@ -26,6 +27,7 @@ import { distill } from './pipeline/distill.js';
 import { latestBlastRadius, runCounterfactual } from './pipeline/counterfactual.js';
 import { proposeStubs, weaveDraft } from './pipeline/weave.js';
 import { extractMoments } from './pipeline/moments.js';
+import { ingestUrl, ingestDocumentText } from './pipeline/ingest.js';
 import { gateReport } from './report/gate.js';
 import { listCounterfactuals } from './db/index.js';
 import { TEMPLATES } from './domain/templates.js';
@@ -208,6 +210,25 @@ app.post('/api/:ws/principles/:id/reject', wrap((req, res) => {
   assertPrincipleTransition(principle.status, 'reject');
   updatePrincipleStatus(ws, id, 'rejected');
   res.json({ ok: true, status: 'rejected' });
+}));
+
+// ---------- corpus ingestion (docs + URLs) ----------
+
+app.post('/api/:ws/ingest-url', wrap(async (req, res) => {
+  const url = req.body?.url;
+  if (typeof url !== 'string' || !url.trim()) throw new Error('url is required');
+  res.json(await ingestUrl(param(req, 'ws'), url.trim(), { admitted: req.body?.pending !== true }));
+}));
+
+app.post('/api/:ws/ingest-doc', wrap((req, res) => {
+  const { title, text } = req.body ?? {};
+  if (typeof text !== 'string' || text.trim().length < 24) throw new Error('doc text is required (min 24 chars)');
+  res.json(ingestDocumentText(param(req, 'ws'), text, { title, admitted: req.body?.pending !== true }));
+}));
+
+app.post('/api/:ws/sources/:id/admit', wrap((req, res) => {
+  admitSource(param(req, 'ws'), param(req, 'id'));
+  res.json({ ok: true });
 }));
 
 // ---------- actions (LLM — require credentials; errors surface to the UI) ----------

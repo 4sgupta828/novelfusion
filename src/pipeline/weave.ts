@@ -77,11 +77,12 @@ function draftSystem(principles: Principle[]): string {
           .join('\n')}`
       : '';
   return `You are the drafting stage of an editorial pipeline for B2B thought leadership.
-Write in the SPEAKER'S authentic voice using their actual words and phrasing wherever possible.
+Write in the authentic voice of the people on the record — use the SPOKEN segments for voice, wording, and thesis; use DOC/WEB segments as supporting evidence (facts, numbers, framing), not as the voice.
 
 Hard rules:
-- Every claim in the draft must be grounded in the provided source utterances. Report each claim-bearing span with its source utterance IDs.
-- Never invent facts, numbers, customers, or quotes. If the source doesn't support a claim, leave it out.
+- Every claim in the draft must be grounded in the provided source segments. Report each claim-bearing span with its source segment IDs.
+- Never invent facts, numbers, customers, or quotes. If the sources don't support a claim, leave it out.
+- Do not attribute a spoken opinion to a document or a web page, or vice versa.
 - No engagement-bait, no hashtag spam, no "I'm humbled to announce".${principleBlock}`;
 }
 
@@ -89,15 +90,35 @@ export async function proposeStubs(workspaceId: string, momentId: string): Promi
   const moment = getMoment(workspaceId, momentId);
   if (!moment) throw new Error(`Moment ${momentId} not found in workspace ${workspaceId}`);
   const utterances = getUtterancesByIds(workspaceId, moment.utteranceIds);
-  const src = utterances.map((u) => `${u.speaker}: ${u.text}`).join('\n');
+  const src = utterances.map((u) => `${segLabel(u)}: ${u.text}`).join('\n');
 
   const result = await structured({
     stage: 'weave-stubs',
     system: STUB_SYSTEM,
-    user: `Moment claim: ${moment.claim}\nWhy now: ${moment.judgment.whyNow}\n\nSource utterances:\n${src}\n\nPropose 6-10 distinct weavings.`,
+    user: `Moment claim: ${moment.claim}\nWhy now: ${moment.judgment.whyNow}\n\nSource segments:\n${src}\n\nPropose 6-10 distinct weavings.`,
     schema: StubSchema,
   });
   return result.stubs;
+}
+
+const ProvenanceOnlySchema = z.object({
+  provenance: z.array(
+    z.object({
+      quote: z.string().describe('A claim-bearing span of the draft'),
+      utteranceIds: z.array(z.string()).describe('Source segment IDs (verbatim) grounding that span'),
+    }),
+  ),
+});
+
+/** Source line label per segment kind (transcript → speaker@time; doc → §heading; web → §anchor). */
+function segLabel(u: Utterance): string {
+  if (u.locator.kind === 'transcript') {
+    return `[SPOKEN] ${u.id} | ${u.speaker ?? '?'}${u.tStartSec != null ? ` @${u.tStartSec}s` : ''}`;
+  }
+  if (u.locator.kind === 'document') {
+    return `[DOC] ${u.id} | ${u.sourceTitle ?? 'doc'}${u.locator.heading ? ` §${u.locator.heading}` : ''}`;
+  }
+  return `[WEB] ${u.id} | ${u.sourceTitle ?? 'web'}${u.locator.anchor ? ` §${u.locator.anchor}` : ''}`;
 }
 
 function inScope(p: Principle, format: AssetFormat): boolean {
@@ -176,12 +197,17 @@ export async function weaveDraft(
   const template = getTemplate(opts.template);
   const cited = getUtterancesByIds(workspaceId, moment.utteranceIds);
   const citedIds = new Set(cited.map((u) => u.id));
+
+  // clip_spec is transcript-only: a doc/web segment has no timing, so a video cut
+  // plan would force the model to fabricate timestamps (Rule 18 / never-invent). Gate it.
+  if (format === 'clip_spec' && cited.some((u) => u.locator.kind !== 'transcript')) {
+    throw new Error('clip_spec requires transcript-grounded moments (documents/web pages have no timing). Weave a text format instead.');
+  }
+
   // Give the writer the surrounding argument, all of it citable (receipts still resolve).
   const context = expandContext(workspaceId, cited);
   const validIds = new Set(context.map((u) => u.id));
-  const src = context
-    .map((u) => `${citedIds.has(u.id) ? '★' : ' '} ${u.id} | ${u.speaker}${u.tStartSec != null ? ` @${u.tStartSec}s` : ''}: ${u.text}`)
-    .join('\n');
+  const src = context.map((u) => `${citedIds.has(u.id) ? '★' : ' '} ${segLabel(u)}: ${u.text}`).join('\n');
 
   const useConstitution = opts.withConstitution ?? true;
   const active = useConstitution
@@ -195,7 +221,7 @@ export async function weaveDraft(
       `Write this asset: ${FORMAT_SPECS[format]}\nAngle: ${angle}\nCentral moment (the piece's thesis): ${moment.claim}` +
       templateBlock(template) +
       VIZ_GUIDANCE +
-      `\n\nSource transcript (★ = the utterances the moment cites; unstarred lines are surrounding context from the same recordings — ALL lines are citable):\n${src}` +
+      `\n\nSource segments (★ = the segments the moment cites; unstarred lines are surrounding context — ALL lines are citable. [SPOKEN] carries a real person's voice; [DOC]/[WEB] are supporting evidence):\n${src}` +
       (useConstitution ? exemplarBlock(workspaceId) : ''),
     schema: DraftSchema,
     maxTokens: 20000,
@@ -203,17 +229,36 @@ export async function weaveDraft(
 
   // Critique-and-revise pass against the same principles (CAI-style application).
   let content = result.content;
+  let revised = false;
   if (active.length > 0) {
-    content = await generate({
+    const out = await generate({
       stage: 'weave-revise',
       system: draftSystem(active),
       user:
         `Review this draft against the editorial constitution above. If it complies, return it UNCHANGED. ` +
         `If any principle is violated, return a minimally revised version that complies. Return ONLY the draft text.\n\n${content}`,
     });
+    revised = out.trim() !== content.trim();
+    content = out;
   }
 
-  const provenance = result.provenance
+  // Provenance must map the FINAL content, not the pre-revision draft (panel bug fix:
+  // the revise pass can alter wording, leaving receipts pointing at spans that no
+  // longer exist). Re-derive against the revised text when it changed.
+  let rawProvenance = result.provenance;
+  if (revised) {
+    const reprov = await structured({
+      stage: 'weave-reprovenance',
+      system:
+        'You map claim-bearing spans of a finished draft to the source segment IDs that ground them. ' +
+        'Report each claim span and its source segment IDs (verbatim from the list). Only spans grounded in the sources.',
+      user: `Source segments:\n${src}\n\nFinished draft:\n${content}`,
+      schema: ProvenanceOnlySchema,
+    });
+    rawProvenance = reprov.provenance;
+  }
+
+  const provenance = rawProvenance
     .map((p) => ({ quote: p.quote, utteranceIds: p.utteranceIds.filter((id) => validIds.has(id)) }))
     .filter((p) => p.utteranceIds.length > 0);
 

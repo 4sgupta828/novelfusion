@@ -1,7 +1,12 @@
 // Core domain entities — Phase 0 subset of PRD §7.
 // SQLite persistence in src/db; these are the in-code shapes.
 
-export type SourceKind = 'upload' | 'public_url' | 'style_guide' | 'published';
+export type SourceKind = 'upload' | 'document' | 'webpage' | 'public_url' | 'style_guide' | 'published';
+
+/** The strategic moat-guard (panel finding): human utterances are the PRIMARY
+ *  grounding for a moment; documents/web are SUPPORTING evidence; a public_web
+ *  segment can never satisfy a person-consent requirement. Also drives receipt weight. */
+export type ProvenanceClass = 'human_utterance' | 'owned_document' | 'public_web';
 export type AssetFormat = 'li_post' | 'x_thread' | 'blog' | 'clip_spec';
 export type MomentState = 'slated' | 'rejected' | 'snoozed' | 'woven';
 export type DraftState = 'draft' | 'in_approval' | 'approved' | 'published' | 'declined';
@@ -25,20 +30,35 @@ export interface Source {
   uri: string;
   title: string;
   recordedAt: string | null;
-  consentBasis: 'public' | 'recorded_consent' | 'uploaded_owner';
+  consentBasis: 'public' | 'recorded_consent' | 'uploaded_owner' | 'synced_pending_review';
+  /** Ingest quarantine (panel finding): auto-ingested/synced sources are NOT
+   *  eligible for extraction until a human admits them. Manual uploads auto-admit. */
+  admitted: boolean;
 }
 
-/** The atomic provenance unit. Every claim in every draft resolves to these. */
+/** Kind-specific provenance anchor. Transcript keeps timestamp+speaker; a document
+ *  cites a page/heading; a webpage cites a URL + anchor. The chip renders per-kind. */
+export type Locator =
+  | { kind: 'transcript' }
+  | { kind: 'document'; page?: number; heading?: string }
+  | { kind: 'webpage'; url: string; anchor?: string; fetchedAt: string };
+
+/** The atomic provenance unit ("segment"). Every claim in every draft resolves to
+ *  one of these — now across transcripts, documents, and web pages. Kept named
+ *  Utterance to avoid a ~60-site rename (panel: additive locator, not a migration). */
 export interface Utterance {
   id: string;
   sourceId: string;
   workspaceId: string;
-  speaker: string;
+  /** null for non-transcript segments (documents/web have no speaker). */
+  speaker: string | null;
   tStartSec: number | null;
   tEndSec: number | null;
   text: string;
   seq: number;
-  /** Joined from sources for display (provenance chips show source + speaker + time). */
+  locator: Locator;
+  provenanceClass: ProvenanceClass;
+  /** Joined from sources for display. */
   sourceTitle?: string;
 }
 

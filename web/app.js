@@ -66,9 +66,39 @@ const fmtTime = (sec) => {
 
 /* ---------- provenance chips (the signature element) ---------- */
 
+// Receipt chip label + class by locator kind. Human utterances are full-strength;
+// documents and web pages render as supporting evidence (muted weight).
+function chipLabel(u) {
+  const loc = u.locator || { kind: 'transcript' };
+  const title = u.sourceTitle ? ` · ${esc(u.sourceTitle)}` : '';
+  if (loc.kind === 'document') {
+    const pg = loc.page ? `p.${loc.page}` : 'doc';
+    const h = loc.heading ? ` · §${esc(loc.heading)}` : '';
+    return { cls: 'chip-doc', mark: '▤', text: `${pg}${h}${title}` };
+  }
+  if (loc.kind === 'webpage') {
+    let host = ''; try { host = new URL(loc.url).hostname.replace(/^www\./, ''); } catch {}
+    const a = loc.anchor ? ` · §${esc(loc.anchor)}` : '';
+    return { cls: 'chip-web', mark: '◍', text: `${esc(host)}${a}` };
+  }
+  return { cls: 'chip-spoken', mark: '▸', text: `${fmtTime(u.tStartSec)} · ${esc(u.speaker ?? '?')}${title}` };
+}
+
 function chipHtml(u) {
-  const src = u.sourceTitle ? ` · ${esc(u.sourceTitle)}` : '';
-  return `<button class="chip" data-utt="${esc(u.id)}" aria-expanded="false">${fmtTime(u.tStartSec)} · ${esc(u.speaker)}${src}</button>`;
+  const { cls, mark, text } = chipLabel(u);
+  return `<button class="chip ${cls}" data-utt="${esc(u.id)}" aria-expanded="false" data-mark="${mark}">${text}</button>`;
+}
+
+function receiptDetail(u) {
+  const loc = u?.locator || { kind: 'transcript' };
+  if (!u) return 'segment not loaded';
+  if (loc.kind === 'document') {
+    return `${u.sourceTitle ?? 'document'}${loc.heading ? ` · §${loc.heading}` : ''}${loc.page ? ` · p.${loc.page}` : ''}  ·  owned document\n${u.text}`;
+  }
+  if (loc.kind === 'webpage') {
+    return `${loc.url}${loc.anchor ? ` · §${loc.anchor}` : ''}\nfetched ${loc.fetchedAt?.slice(0, 10) ?? '?'}  ·  public web\n${u.text}`;
+  }
+  return `${u.speaker ?? '?'} · ${u.sourceTitle ?? 'unknown source'} @ ${fmtTime(u.tStartSec)}  ·  on the record\n${u.text}`;
 }
 
 function wireChips(container, utterances) {
@@ -78,14 +108,12 @@ function wireChips(container, utterances) {
       const open = chip.getAttribute('aria-expanded') === 'true';
       chip.setAttribute('aria-expanded', String(!open));
       const row = chip.parentElement;
-      // Receipts append AFTER the chip row so expanding never reflows sibling chips.
       $$(`.receipt[data-for="${CSS.escape(chip.dataset.utt)}"]`, row.parentElement).forEach((r) => r.remove());
       if (!open) {
-        const u = byId[chip.dataset.utt];
         const r = document.createElement('div');
         r.className = 'receipt';
         r.dataset.for = chip.dataset.utt;
-        r.textContent = `${u ? u.speaker : '?'} · ${u?.sourceTitle ?? 'unknown source'} @ ${fmtTime(u?.tStartSec)}\n${u ? u.text : 'utterance not loaded'}`;
+        r.textContent = receiptDetail(byId[chip.dataset.utt]);
         row.after(r);
       }
     });

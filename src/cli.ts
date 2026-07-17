@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import {
+  admitSource,
   ensureWorkspace,
   getDb,
   getDraft,
@@ -16,7 +17,7 @@ import {
   updateMomentState,
   updatePrincipleStatus,
 } from './db/index.js';
-import { ingestFile } from './pipeline/ingest.js';
+import { ingestFile, ingestDocument, ingestUrl } from './pipeline/ingest.js';
 import { extractMoments } from './pipeline/moments.js';
 import { proposeStubs, weaveDraft } from './pipeline/weave.js';
 import { captureEdit } from './pipeline/edits.js';
@@ -58,6 +59,43 @@ program
       const { source, utteranceCount } = ingestFile(workspaceId, f, { speaker: opts.speaker, title: opts.title });
       console.log(`ingested ${source.title} → ${source.id} (${utteranceCount} utterances)`);
     }
+  });
+
+program
+  .command('ingest-doc')
+  .argument('<files...>', 'document files (.md / .txt) — owned company docs (supporting evidence)')
+  .option('--title <title>', 'source title')
+  .option('--pending', 'ingest to the quarantine (not eligible for extraction until admitted)')
+  .description('ingest documents → owned_document segments')
+  .action(function (this: Command, files: string[], opts: { title?: string; pending?: boolean }) {
+    const workspaceId = ws(this);
+    for (const f of files) {
+      const { source, segmentCount } = ingestDocument(workspaceId, f, { title: opts.title, admitted: !opts.pending });
+      console.log(`ingested doc ${source.title} → ${source.id} (${segmentCount} segments${opts.pending ? ', PENDING review' : ''})`);
+    }
+  });
+
+program
+  .command('ingest-url')
+  .argument('<urls...>', 'public web page URLs — external references (supporting evidence)')
+  .option('--title <title>', 'source title')
+  .option('--pending', 'ingest to the quarantine')
+  .description('ingest web pages → public_web segments')
+  .action(async function (this: Command, urls: string[], opts: { title?: string; pending?: boolean }) {
+    const workspaceId = ws(this);
+    for (const u of urls) {
+      const { source, segmentCount } = await ingestUrl(workspaceId, u, { title: opts.title, admitted: !opts.pending });
+      console.log(`ingested url ${source.title} → ${source.id} (${segmentCount} segments${opts.pending ? ', PENDING review' : ''})`);
+    }
+  });
+
+program
+  .command('admit')
+  .argument('<sourceId>')
+  .description('admit a quarantined source into the corpus (makes it eligible for extraction)')
+  .action(function (this: Command, sourceId: string) {
+    admitSource(ws(this), sourceId);
+    console.log(`admitted ${sourceId}`);
   });
 
 program

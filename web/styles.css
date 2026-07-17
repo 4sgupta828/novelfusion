@@ -173,9 +173,13 @@ kbd {
   background: none; border: 1px solid var(--line); border-radius: 999px;
   padding: 2px 9px 2px 7px; margin: 0 6px 6px 0;
 }
-.chip:hover { border-color: var(--pencil); color: var(--pencil); }
-.chip::before { content: '▸'; color: var(--pencil); font-size: 9px; }
+.chip::before { content: attr(data-mark); color: var(--pencil); font-size: 9px; }
 .chip[aria-expanded='true']::before { content: '▾'; }
+.chip.chip-spoken:hover { border-color: var(--pencil); color: var(--pencil); }
+/* documents & web are SUPPORTING evidence — rendered at lower visual weight */
+.chip-doc, .chip-web { color: var(--muted); border-style: dashed; }
+.chip-doc::before, .chip-web::before { color: var(--muted); }
+.chip-doc:hover, .chip-web:hover { border-color: var(--line-strong); color: var(--ink); border-style: solid; }
 .receipt {
   border-left: 2px solid var(--pencil); background: var(--pencil-soft);
   font-family: var(--mono); font-size: 12px; line-height: 1.6;

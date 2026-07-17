@@ -26,13 +26,19 @@ const MomentSchema = z.object({
 });
 
 const SYSTEM = `You are the moment-extraction stage of an editorial pipeline for B2B thought leadership.
-From a diarized transcript you identify "moments": specific, contrarian-or-concrete, publishable insights actually said by a speaker — strong claims, market predictions, hard-won tactical advice, sharp framings of customer pain.
+From a corpus you identify "moments": specific, contrarian-or-concrete, publishable insights — strong claims, market predictions, hard-won tactical advice, sharp framings of customer pain.
+
+Each source segment is tagged with a provenance class:
+- [SPOKEN] — a real human said this on the record (transcript). This is the PRIMARY grounding for a moment; it carries a real person's voice and consent.
+- [DOC] — an owned company document (deck, memo, one-pager). SUPPORTING evidence — a fact, number, or framing that backs a spoken claim.
+- [WEB] — a public web page. SUPPORTING evidence only (external context, published claims).
 
 Rules:
-- A moment must be grounded in the provided utterances; cite their IDs exactly as given.
+- A moment must be grounded in the provided segments; cite their IDs exactly as given.
+- PREFER moments grounded in [SPOKEN] segments. A [DOC]/[WEB] segment may SUPPORT a moment, but do not build a moment solely from a document or web page unless it is a genuinely strong standalone data point — and never treat public web text as if a person said it.
 - Prefer distinctive, opinionated claims over consensus statements. "Quality matters" is not a moment; "we killed our SLA dashboard because it optimized the wrong fear" is.
-- Do not invent, embellish, or combine claims across speakers.
-- Flag risks honestly (named customers, forward-looking statements, competitor mentions, sensitive topics).
+- Do not invent, embellish, or fuse unrelated claims across sources.
+- Flag risks honestly (named customers, forward-looking statements, competitor mentions, sensitive/confidential material).
 - If a chunk contains no genuine moments, return an empty list. Abstaining is correct; padding is not.`;
 
 const CHUNK_CHARS = 8000;
@@ -54,19 +60,36 @@ function chunkUtterances(utterances: Utterance[]): Utterance[][] {
   return chunks;
 }
 
+const CLASS_TAG: Record<string, string> = { human_utterance: 'SPOKEN', owned_document: 'DOC', public_web: 'WEB' };
+
+function segLine(u: Utterance & { sourceTitle?: string }): string {
+  const tag = CLASS_TAG[u.provenanceClass] ?? 'SPOKEN';
+  if (u.locator.kind === 'transcript') {
+    return `[${tag}] ${u.id} | ${u.speaker ?? '?'}${u.tStartSec != null ? ` @${u.tStartSec}s` : ''}: ${u.text}`;
+  }
+  if (u.locator.kind === 'document') {
+    const h = u.locator.heading ? ` §${u.locator.heading}` : '';
+    return `[${tag}] ${u.id} | doc${h}: ${u.text}`;
+  }
+  const h = u.locator.anchor ? ` §${u.locator.anchor}` : '';
+  return `[${tag}] ${u.id} | web${h}: ${u.text}`;
+}
+
 export async function extractMoments(workspaceId: string): Promise<Moment[]> {
-  const utterances = listUtterances(workspaceId);
-  if (utterances.length === 0) throw new Error(`No utterances in workspace ${workspaceId} — run ingest first.`);
+  // Extraction reads only ADMITTED sources (ingest quarantine — a pending doc never
+  // reaches the pipeline until a human admits it). Per-source order preserves context.
+  const utterances = listUtterances(workspaceId, undefined, { admittedOnly: true });
+  if (utterances.length === 0) throw new Error(`No admitted sources in workspace ${workspaceId} — ingest and admit sources first.`);
 
   const created: Moment[] = [];
   for (const chunk of chunkUtterances(utterances)) {
     const validIds = new Set(chunk.map((u) => u.id));
-    const input = chunk.map((u) => `${u.id} | ${u.speaker}${u.tStartSec != null ? ` @${u.tStartSec}s` : ''}: ${u.text}`).join('\n');
+    const input = chunk.map(segLine).join('\n');
 
     const result = await structured({
       stage: 'extract-moments',
       system: SYSTEM,
-      user: `Transcript chunk (format: utteranceId | speaker: text):\n\n${input}`,
+      user: `Corpus segments (format: [CLASS] segmentId | source: text):\n\n${input}`,
       schema: MomentSchema,
     });
 

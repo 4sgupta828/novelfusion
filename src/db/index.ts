@@ -35,14 +35,45 @@ export function getDb(): Database.Database {
 /** Additive column migrations for DBs created before a column existed.
  *  Idempotent — checks table_info before each ALTER (SQLite can't ADD IF NOT EXISTS). */
 function migrate(d: Database.Database): void {
-  const cols = new Set((d.prepare('PRAGMA table_info(drafts)').all() as { name: string }[]).map((r) => r.name));
-  const add: [string, string][] = [
+  const addCols = (table: string, add: [string, string][]) => {
+    const cols = new Set((d.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((r) => r.name));
+    for (const [name, def] of add) if (!cols.has(name)) d.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+  };
+  addCols('drafts', [
     ['template', "TEXT NOT NULL DEFAULT 'freeform'"],
     ['sections', "TEXT NOT NULL DEFAULT '[]'"],
     ['viz', "TEXT NOT NULL DEFAULT '[]'"],
-  ];
-  for (const [name, def] of add) {
-    if (!cols.has(name)) d.exec(`ALTER TABLE drafts ADD COLUMN ${name} ${def}`);
+  ]);
+  addCols('utterances', [
+    ['locator', `TEXT NOT NULL DEFAULT '{"kind":"transcript"}'`],
+    ['provenance_class', "TEXT NOT NULL DEFAULT 'human_utterance'"],
+  ]);
+  addCols('sources', [['admitted', 'INTEGER NOT NULL DEFAULT 1']]);
+
+  // Relax the old speaker NOT NULL constraint (docs/web segments have no speaker).
+  // SQLite can't ALTER a column constraint, so rebuild the table. Safe: nothing has
+  // a FK to utterances (moments store JSON ids). Only runs on legacy DBs.
+  const info = d.prepare('PRAGMA table_info(utterances)').all() as { name: string; notnull: number }[];
+  const speakerCol = info.find((c) => c.name === 'speaker');
+  if (speakerCol && speakerCol.notnull === 1) {
+    d.transaction(() => {
+      d.exec('DROP INDEX IF EXISTS idx_utterances_ws');
+      d.exec(`CREATE TABLE utterances_new (
+        id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL REFERENCES sources(id),
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+        speaker TEXT,
+        t_start_sec REAL, t_end_sec REAL,
+        text TEXT NOT NULL, seq INTEGER NOT NULL,
+        locator TEXT NOT NULL DEFAULT '{"kind":"transcript"}',
+        provenance_class TEXT NOT NULL DEFAULT 'human_utterance'
+      )`);
+      d.exec(`INSERT INTO utterances_new (id, source_id, workspace_id, speaker, t_start_sec, t_end_sec, text, seq, locator, provenance_class)
+        SELECT id, source_id, workspace_id, speaker, t_start_sec, t_end_sec, text, seq, locator, provenance_class FROM utterances`);
+      d.exec('DROP TABLE utterances');
+      d.exec('ALTER TABLE utterances_new RENAME TO utterances');
+      d.exec('CREATE INDEX IF NOT EXISTS idx_utterances_ws ON utterances(workspace_id, source_id, seq)');
+    })();
   }
 }
 
@@ -61,40 +92,58 @@ export function ensureWorkspace(id: string, name?: string): void {
 export function insertSource(s: Source): void {
   getDb()
     .prepare(
-      `INSERT INTO sources (id, workspace_id, kind, uri, title, recorded_at, consent_basis)
-       VALUES (@id, @workspaceId, @kind, @uri, @title, @recordedAt, @consentBasis)`,
+      `INSERT INTO sources (id, workspace_id, kind, uri, title, recorded_at, consent_basis, admitted)
+       VALUES (@id, @workspaceId, @kind, @uri, @title, @recordedAt, @consentBasis, @admittedInt)`,
     )
-    .run(s as unknown as Record<string, unknown>);
+    .run({ ...s, admittedInt: s.admitted ? 1 : 0 } as unknown as Record<string, unknown>);
+}
+
+export function admitSource(workspaceId: string, sourceId: string): void {
+  getDb().prepare('UPDATE sources SET admitted = 1 WHERE workspace_id = ? AND id = ?').run(workspaceId, sourceId);
 }
 
 export function insertUtterances(rows: Utterance[]): void {
   const stmt = getDb().prepare(
-    `INSERT INTO utterances (id, source_id, workspace_id, speaker, t_start_sec, t_end_sec, text, seq)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO utterances (id, source_id, workspace_id, speaker, t_start_sec, t_end_sec, text, seq, locator, provenance_class)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const tx = getDb().transaction((items: Utterance[]) => {
     for (const u of items) {
-      stmt.run(u.id, u.sourceId, u.workspaceId, u.speaker, u.tStartSec, u.tEndSec, u.text, u.seq);
+      stmt.run(u.id, u.sourceId, u.workspaceId, u.speaker, u.tStartSec, u.tEndSec, u.text, u.seq,
+        JSON.stringify(u.locator), u.provenanceClass);
     }
   });
   tx(rows);
 }
 
-export function listUtterances(workspaceId: string, sourceId?: string): (Utterance & { workspaceId: string })[] {
-  const q = sourceId
-    ? getDb().prepare('SELECT * FROM utterances WHERE workspace_id = ? AND source_id = ? ORDER BY seq')
-    : getDb().prepare('SELECT * FROM utterances WHERE workspace_id = ? ORDER BY source_id, seq');
-  const rows = (sourceId ? q.all(workspaceId, sourceId) : q.all(workspaceId)) as Record<string, unknown>[];
-  return rows.map((r) => ({
+function rowToUtterance(r: Record<string, unknown>): Utterance & { workspaceId: string } {
+  return {
     id: r.id as string,
     sourceId: r.source_id as string,
     workspaceId: r.workspace_id as string,
-    speaker: r.speaker as string,
+    speaker: (r.speaker as string | null) ?? null,
     tStartSec: r.t_start_sec as number | null,
     tEndSec: r.t_end_sec as number | null,
     text: r.text as string,
     seq: r.seq as number,
-  }));
+    locator: JSON.parse((r.locator as string) ?? '{"kind":"transcript"}'),
+    provenanceClass: ((r.provenance_class as string) ?? 'human_utterance') as Utterance['provenanceClass'],
+    sourceTitle: r.source_title as string | undefined,
+  };
+}
+
+/** Extraction reads only ADMITTED sources (ingest quarantine). */
+export function listUtterances(
+  workspaceId: string,
+  sourceId?: string,
+  opts: { admittedOnly?: boolean } = {},
+): (Utterance & { workspaceId: string })[] {
+  const admitted = opts.admittedOnly ? ' AND s.admitted = 1' : '';
+  const sql = sourceId
+    ? `SELECT u.* FROM utterances u JOIN sources s ON s.id = u.source_id WHERE u.workspace_id = ? AND u.source_id = ?${admitted} ORDER BY u.seq`
+    : `SELECT u.* FROM utterances u JOIN sources s ON s.id = u.source_id WHERE u.workspace_id = ?${admitted} ORDER BY u.source_id, u.seq`;
+  const rows = (sourceId ? getDb().prepare(sql).all(workspaceId, sourceId) : getDb().prepare(sql).all(workspaceId)) as Record<string, unknown>[];
+  return rows.map(rowToUtterance);
 }
 
 export function getUtterancesByIds(workspaceId: string, ids: string[]): (Utterance & { workspaceId: string })[] {
@@ -107,17 +156,7 @@ export function getUtterancesByIds(workspaceId: string, ids: string[]): (Utteran
        WHERE u.workspace_id = ? AND u.id IN (${placeholders}) ORDER BY u.seq`,
     )
     .all(workspaceId, ...ids) as Record<string, unknown>[];
-  return rows.map((r) => ({
-    id: r.id as string,
-    sourceId: r.source_id as string,
-    workspaceId: r.workspace_id as string,
-    speaker: r.speaker as string,
-    tStartSec: r.t_start_sec as number | null,
-    tEndSec: r.t_end_sec as number | null,
-    text: r.text as string,
-    seq: r.seq as number,
-    sourceTitle: r.source_title as string,
-  }));
+  return rows.map(rowToUtterance);
 }
 
 /** Counterfactual results are per-RUN evidence: a fresh ratification run replaces
