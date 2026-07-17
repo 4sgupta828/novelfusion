@@ -102,6 +102,37 @@ export function admitSource(workspaceId: string, sourceId: string): void {
   getDb().prepare('UPDATE sources SET admitted = 1 WHERE workspace_id = ? AND id = ?').run(workspaceId, sourceId);
 }
 
+export interface SourceSummary {
+  id: string;
+  kind: string;
+  title: string;
+  uri: string;
+  consentBasis: string;
+  admitted: boolean;
+  segmentCount: number;
+  createdAt: string;
+}
+
+export function listSources(workspaceId: string): SourceSummary[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT s.id, s.kind, s.title, s.uri, s.consent_basis, s.admitted, s.created_at,
+              (SELECT COUNT(*) FROM utterances u WHERE u.source_id = s.id) AS seg_count
+       FROM sources s WHERE s.workspace_id = ? ORDER BY s.created_at DESC`,
+    )
+    .all(workspaceId) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    id: r.id as string,
+    kind: r.kind as string,
+    title: r.title as string,
+    uri: r.uri as string,
+    consentBasis: r.consent_basis as string,
+    admitted: (r.admitted as number) === 1,
+    segmentCount: r.seg_count as number,
+    createdAt: r.created_at as string,
+  }));
+}
+
 export function insertUtterances(rows: Utterance[]): void {
   const stmt = getDb().prepare(
     `INSERT INTO utterances (id, source_id, workspace_id, speaker, t_start_sec, t_end_sec, text, seq, locator, provenance_class)

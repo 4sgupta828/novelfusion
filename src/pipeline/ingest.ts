@@ -164,15 +164,15 @@ export function ingestDocument(
   });
 }
 
-/** Ingest a document from raw text (the web UI pastes text; the CLI reads a file). */
-export function ingestDocumentText(
+/** Persist a document source + its segments. `blocks` carry an optional page/heading
+ *  locator anchor (the doc receipt). Shared by the text/PDF/DOCX ingesters. */
+function insertDocument(
   workspaceId: string,
-  raw: string,
-  opts: { title?: string; uri?: string; admitted?: boolean } = {},
+  blocks: { heading?: string; page?: number; text: string }[],
+  opts: { title?: string; uri?: string; admitted?: boolean },
 ): { source: Source; segmentCount: number } {
   ensureWorkspace(workspaceId);
-  const segs = segmentDocument(raw);
-  if (segs.length === 0) throw new Error('No text segments parsed from document');
+  if (blocks.length === 0) throw new Error('No text segments parsed from document');
   const source: Source = {
     id: newId('src'),
     workspaceId,
@@ -184,20 +184,81 @@ export function ingestDocumentText(
     admitted: opts.admitted ?? true,
   };
   insertSource(source);
-  const rows: Utterance[] = segs.map((s, i) => ({
+  const rows: Utterance[] = blocks.map((b, i) => ({
     id: newId('seg'),
     sourceId: source.id,
     workspaceId,
     speaker: null,
     tStartSec: null,
     tEndSec: null,
-    text: s.text,
+    text: b.text,
     seq: i,
-    locator: { kind: 'document', heading: s.heading ?? undefined },
+    locator: { kind: 'document', heading: b.heading, page: b.page },
     provenanceClass: 'owned_document',
   }));
   insertUtterances(rows);
   return { source, segmentCount: rows.length };
+}
+
+/** Ingest a document from raw text (the web UI pastes text; the CLI reads a file). */
+export function ingestDocumentText(
+  workspaceId: string,
+  raw: string,
+  opts: { title?: string; uri?: string; admitted?: boolean } = {},
+): { source: Source; segmentCount: number } {
+  return insertDocument(workspaceId, segmentDocument(raw).map((s) => ({ heading: s.heading ?? undefined, text: s.text })), opts);
+}
+
+/** Route an uploaded file to the right document ingester by extension. */
+export async function ingestUploadBuffer(
+  workspaceId: string,
+  filename: string,
+  buffer: Buffer,
+  opts: { title?: string; admitted?: boolean } = {},
+): Promise<{ source: Source; segmentCount: number }> {
+  const ext = (filename.split('.').pop() ?? '').toLowerCase();
+  const o = { title: opts.title ?? filename, uri: `upload:${filename}`, admitted: opts.admitted };
+  if (ext === 'pdf') return ingestPdfBuffer(workspaceId, buffer, o);
+  if (ext === 'docx') return ingestDocxBuffer(workspaceId, buffer, o);
+  if (ext === 'html' || ext === 'htm') {
+    const { blocks } = extractReadable(buffer.toString('utf-8'));
+    return insertDocument(workspaceId, blocks.map((b) => ({ heading: b.heading ?? undefined, text: b.text })), o);
+  }
+  if (ext === 'md' || ext === 'markdown' || ext === 'txt' || ext === '') {
+    return ingestDocumentText(workspaceId, buffer.toString('utf-8'), o);
+  }
+  throw new Error(`Unsupported file type ".${ext}" — supported: pdf, docx, md, txt, html`);
+}
+
+/** Ingest a PDF buffer — per-page text with page-numbered locators. */
+export async function ingestPdfBuffer(
+  workspaceId: string,
+  data: Buffer,
+  opts: { title?: string; uri?: string; admitted?: boolean } = {},
+): Promise<{ source: Source; segmentCount: number }> {
+  const { PDFParse } = await import('pdf-parse');
+  const parser = new PDFParse({ data });
+  const result = await parser.getText();
+  const blocks: { heading?: string; page?: number; text: string }[] = [];
+  for (const pg of result.pages ?? []) {
+    for (const s of segmentDocument(pg.text)) blocks.push({ heading: s.heading ?? undefined, page: pg.num, text: s.text });
+  }
+  if (blocks.length === 0) {
+    for (const s of segmentDocument(result.text ?? '')) blocks.push({ heading: s.heading ?? undefined, text: s.text });
+  }
+  return insertDocument(workspaceId, blocks, opts);
+}
+
+/** Ingest a DOCX buffer — mammoth → HTML → heading-anchored segments. */
+export async function ingestDocxBuffer(
+  workspaceId: string,
+  buffer: Buffer,
+  opts: { title?: string; uri?: string; admitted?: boolean } = {},
+): Promise<{ source: Source; segmentCount: number }> {
+  const mammoth = await import('mammoth');
+  const { value: html } = await mammoth.convertToHtml({ buffer });
+  const { blocks } = extractReadable(html);
+  return insertDocument(workspaceId, blocks.map((b) => ({ heading: b.heading ?? undefined, text: b.text })), opts);
 }
 
 // ---------- web page ingester (external link) ----------

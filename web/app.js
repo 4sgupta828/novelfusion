@@ -688,9 +688,185 @@ async function renderGate(view, stale) {
   `;
 }
 
+/* ---------- corpus: the source material for this workspace ---------- */
+
+// Multipart upload can't go through api() (which forces JSON). Same origin,
+// same X-NF-Workbench guard; the browser sets the multipart boundary itself.
+async function uploadFiles(files) {
+  const fd = new FormData();
+  [...files].forEach((f) => fd.append('files', f));
+  const res = await fetch(`/api/${state.ws}/ingest-file`, {
+    method: 'POST',
+    headers: { 'X-NF-Workbench': '1' }, // do NOT set Content-Type — the boundary is auto-added
+    body: fd,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+  return data;
+}
+
+const KIND_BADGE = {
+  transcript: { cls: 'chip-spoken', mark: '▸', label: 'transcript' },
+  document: { cls: 'chip-doc', mark: '▤', label: 'document' },
+  webpage: { cls: 'chip-web', mark: '◍', label: 'web page' },
+};
+const CONSENT_LABEL = {
+  public: 'public',
+  recorded_consent: 'recorded consent',
+  uploaded_owner: 'owner-uploaded',
+  synced_pending_review: 'pending review',
+};
+
+async function renderCorpus(view, stale) {
+  const sources = await api(`${state.ws}/sources`);
+  if (stale()) return;
+  setBudget(0);
+  const segTotal = sources.reduce((a, s) => a + s.segmentCount, 0);
+
+  view.innerHTML = `
+    <div class="corpus-intro">
+      <p class="corpus-lede">Everything this workspace can draw from. Drop documents, paste text, or add a public URL — each becomes provenance-linked passages the pipeline cites as receipts. <strong class="corpus-boundary">Scoped to this workspace only.</strong></p>
+    </div>
+
+    <div class="corpus-ingest">
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload files">
+        <input type="file" id="file-input" multiple accept=".pdf,.docx,.doc,.md,.markdown,.txt,.html,.htm,.vtt,.srt" hidden />
+        <div class="dropzone-mark" aria-hidden="true">▤</div>
+        <div class="dropzone-title">Drop files here, or <span class="dropzone-link">browse</span></div>
+        <div class="dropzone-hint">PDF · Word · Markdown · text · HTML — up to 25&nbsp;MB each, 20 at a time</div>
+      </div>
+
+      <div class="corpus-forms">
+        <form class="corpus-form" id="url-form">
+          <span class="corpus-form-label">Add a public URL</span>
+          <div class="corpus-form-row">
+            <input type="url" id="url-input" placeholder="https://…" aria-label="Public URL" />
+            <button class="secondary" type="submit">Fetch</button>
+          </div>
+          <span class="corpus-form-hint">Fetched server-side; private/internal addresses are blocked.</span>
+        </form>
+        <form class="corpus-form" id="text-form">
+          <span class="corpus-form-label">Paste text</span>
+          <input type="text" id="text-title" placeholder="Title (optional)" aria-label="Title" />
+          <textarea id="text-body" rows="3" placeholder="Paste a passage, note, or excerpt…" aria-label="Text to ingest"></textarea>
+          <div class="corpus-form-row corpus-form-row--end">
+            <button class="secondary" type="submit">Add to corpus</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="corpus-list-head">
+      <span class="section-label" style="margin:0">Sources</span>
+      <span class="corpus-count">${sources.length} source${sources.length === 1 ? '' : 's'} · ${segTotal} passage${segTotal === 1 ? '' : 's'}</span>
+    </div>
+    <div id="corpus-list">${sourcesHtml(sources)}</div>
+  `;
+
+  wireCorpus(view);
+}
+
+function sourcesHtml(sources) {
+  if (sources.length === 0) {
+    return `<div class="empty">No sources yet.<div class="hint">Upload a document, paste text, or add a URL above to start this workspace's corpus.</div></div>`;
+  }
+  return sources
+    .map((s) => {
+      const b = KIND_BADGE[s.kind] ?? { cls: 'chip-doc', mark: '▤', label: s.kind };
+      const isUrl = /^https?:\/\//.test(s.uri || '');
+      const sub = isUrl
+        ? `<a class="corpus-uri" href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer">${esc(s.uri)}</a>`
+        : `<span class="corpus-uri">${esc(s.uri || '—')}</span>`;
+      return `
+      <div class="corpus-row" data-id="${esc(s.id)}">
+        <span class="chip ${b.cls}" data-mark="${b.mark}" aria-hidden="false">${b.label}</span>
+        <div class="corpus-row-main">
+          <div class="corpus-title">${esc(s.title || 'Untitled source')}</div>
+          <div class="corpus-sub">${sub}</div>
+        </div>
+        <div class="corpus-row-meta">
+          <span class="pill neutral">${s.segmentCount} passage${s.segmentCount === 1 ? '' : 's'}</span>
+          <span class="pill neutral">${esc(CONSENT_LABEL[s.consentBasis] ?? s.consentBasis)}</span>
+          ${s.admitted
+            ? '<span class="pill active" title="In the extraction pool">admitted</span>'
+            : `<button class="secondary act-admit" title="Admit into the extraction pool">Admit</button>`}
+        </div>
+      </div>`;
+    })
+    .join('');
+}
+
+function wireCorpus(view) {
+  const dz = $('#dropzone', view);
+  const fileInput = $('#file-input', view);
+
+  const doUpload = async (files) => {
+    if (!files || files.length === 0) return;
+    dz.classList.add('busy');
+    dz.setAttribute('aria-busy', 'true');
+    try {
+      const results = await uploadFiles(files);
+      const segs = results.reduce((a, r) => a + (r.segmentCount || 0), 0);
+      toast(`${results.length} file${results.length === 1 ? '' : 's'} ingested — ${segs} passage${segs === 1 ? '' : 's'}`);
+      render();
+    } catch (e) {
+      toast(e.message, true);
+      dz.classList.remove('busy');
+      dz.removeAttribute('aria-busy');
+    }
+  };
+
+  dz.addEventListener('click', () => fileInput.click());
+  dz.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+  });
+  fileInput.addEventListener('change', () => doUpload(fileInput.files));
+  ['dragenter', 'dragover'].forEach((ev) =>
+    dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('dragover'); }),
+  );
+  ['dragleave', 'drop'].forEach((ev) =>
+    dz.addEventListener(ev, (e) => { e.preventDefault(); if (ev === 'dragleave' && dz.contains(e.relatedTarget)) return; dz.classList.remove('dragover'); }),
+  );
+  dz.addEventListener('drop', (e) => doUpload(e.dataTransfer?.files));
+
+  $('#url-form', view).addEventListener('submit', (e) => {
+    e.preventDefault();
+    const url = $('#url-input', view).value.trim();
+    if (!url) return;
+    busy(e.submitter, async () => {
+      const r = await api(`${state.ws}/ingest-url`, { method: 'POST', body: { url } });
+      toast(`Fetched — ${r.segmentCount ?? '?'} passage${r.segmentCount === 1 ? '' : 's'} from ${esc(r.source?.title ?? url)}`);
+      render();
+    });
+  });
+
+  $('#text-form', view).addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = $('#text-body', view).value.trim();
+    const title = $('#text-title', view).value.trim();
+    if (text.length < 24) return void toast('Paste at least a sentence or two (24+ characters).', true);
+    busy(e.submitter, async () => {
+      const r = await api(`${state.ws}/ingest-doc`, { method: 'POST', body: { text, title: title || undefined } });
+      toast(`Added — ${r.segmentCount ?? '?'} passage${r.segmentCount === 1 ? '' : 's'}`);
+      render();
+    });
+  });
+
+  $$('.corpus-row', view).forEach((row) => {
+    $('.act-admit', row)?.addEventListener('click', (e) =>
+      busy(e.target, async () => {
+        await api(`${state.ws}/sources/${row.dataset.id}/admit`, { method: 'POST' });
+        toast('Admitted into the extraction pool.');
+        render();
+      }),
+    );
+  });
+}
+
 /* ---------- shell ---------- */
 
 const VIEWS = {
+  corpus: { title: 'Corpus', render: renderCorpus },
   slate: { title: 'Slate', render: renderSlate },
   drafts: { title: 'Drafts', render: renderDrafts },
   constitution: { title: 'Constitution', render: renderConstitution },
@@ -762,7 +938,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const viewKeys = { 1: 'slate', 2: 'drafts', 3: 'constitution', 4: 'gate' };
+  const viewKeys = { 1: 'corpus', 2: 'slate', 3: 'drafts', 4: 'constitution', 5: 'gate' };
   if (viewKeys[e.key]) return switchView(viewKeys[e.key]);
 
   const view = $('#view');

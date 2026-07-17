@@ -4,6 +4,7 @@
 // src/db, which filters every query on workspace_id).
 
 import express from 'express';
+import multer from 'multer';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
@@ -20,6 +21,7 @@ import {
   updateMomentState,
   updatePrincipleStatus,
   admitSource,
+  listSources,
 } from './db/index.js';
 import { captureEditContent } from './pipeline/edits.js';
 import { assertPrincipleTransition } from './domain/lifecycle.js';
@@ -27,7 +29,7 @@ import { distill } from './pipeline/distill.js';
 import { latestBlastRadius, runCounterfactual } from './pipeline/counterfactual.js';
 import { proposeStubs, weaveDraft } from './pipeline/weave.js';
 import { extractMoments } from './pipeline/moments.js';
-import { ingestUrl, ingestDocumentText } from './pipeline/ingest.js';
+import { ingestUrl, ingestDocumentText, ingestUploadBuffer } from './pipeline/ingest.js';
 import { gateReport } from './report/gate.js';
 import { listCounterfactuals } from './db/index.js';
 import { TEMPLATES } from './domain/templates.js';
@@ -212,7 +214,23 @@ app.post('/api/:ws/principles/:id/reject', wrap((req, res) => {
   res.json({ ok: true, status: 'rejected' });
 }));
 
-// ---------- corpus ingestion (docs + URLs) ----------
+// ---------- corpus: sources list + ingestion (upload / paste / URL) ----------
+
+app.get('/api/:ws/sources', wrap((req, res) => {
+  res.json(listSources(param(req, 'ws')));
+}));
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+app.post('/api/:ws/ingest-file', upload.array('files', 20), wrap(async (req, res) => {
+  const files = (req.files as Express.Multer.File[]) ?? [];
+  if (files.length === 0) throw new Error('no files uploaded');
+  const results = [];
+  for (const f of files) {
+    const r = await ingestUploadBuffer(param(req, 'ws'), f.originalname, f.buffer, {});
+    results.push({ id: r.source.id, title: r.source.title, kind: r.source.kind, segmentCount: r.segmentCount });
+  }
+  res.json(results);
+}));
 
 app.post('/api/:ws/ingest-url', wrap(async (req, res) => {
   const url = req.body?.url;
