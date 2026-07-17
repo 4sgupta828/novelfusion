@@ -16,7 +16,11 @@ import {
   listPrinciples,
   updateMomentState,
   updatePrincipleStatus,
+  listClusters,
+  updateCluster,
+  clusterMemberCounts,
 } from './db/index.js';
+import { clusterPrinciples } from './pipeline/clusters.js';
 import { ingestFile, ingestDocument, ingestUrl } from './pipeline/ingest.js';
 import { extractMoments } from './pipeline/moments.js';
 import { embedBackfill, answerQuery } from './pipeline/retrieval.js';
@@ -276,6 +280,30 @@ program
     assertPrincipleTransition(principle.status, 'promote');
     updatePrincipleStatus(workspaceId, principleId, 'active');
     console.log(`${principleId} → active`);
+  });
+
+program
+  .command('cluster')
+  .description('auto-cluster unclustered principles into themes (LLM), then list clusters')
+  .action(async function (this: Command) {
+    const workspaceId = ws(this);
+    const { created, assigned } = await clusterPrinciples(workspaceId);
+    console.log(`created ${created.length} cluster(s), assigned ${assigned} principle(s)`);
+    const counts = clusterMemberCounts(workspaceId);
+    for (const c of listClusters(workspaceId)) {
+      console.log(`  ${c.enabled ? '[ON ]' : '[OFF]'} ${c.name} — ${counts.get(c.id) ?? 0} principle(s)  ${c.id}`);
+    }
+  });
+
+program
+  .command('cluster-toggle')
+  .argument('<clusterId>')
+  .argument('<on|off>')
+  .description('enable/disable a cluster (escape hatch — suspends its active principles from generation)')
+  .action(function (this: Command, clusterId: string, state: string) {
+    const workspaceId = ws(this);
+    updateCluster(workspaceId, clusterId, { enabled: state === 'on' });
+    console.log(`cluster ${clusterId} → ${state === 'on' ? 'enabled' : 'disabled (suspended from generation)'}`);
   });
 
 program

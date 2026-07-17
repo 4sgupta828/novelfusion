@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import type {
+  Cluster,
   CounterfactualResult,
   Draft,
   EditEvent,
@@ -49,6 +50,7 @@ function migrate(d: Database.Database): void {
     ['provenance_class', "TEXT NOT NULL DEFAULT 'human_utterance'"],
   ]);
   addCols('sources', [['admitted', 'INTEGER NOT NULL DEFAULT 1']]);
+  addCols('principles', [['cluster_id', 'TEXT']]);
 
   // Relax the old speaker NOT NULL constraint (docs/web segments have no speaker).
   // SQLite can't ALTER a column constraint, so rebuild the table. Safe: nothing has
@@ -100,6 +102,37 @@ export function insertSource(s: Source): void {
 
 export function admitSource(workspaceId: string, sourceId: string): void {
   getDb().prepare('UPDATE sources SET admitted = 1 WHERE workspace_id = ? AND id = ?').run(workspaceId, sourceId);
+}
+
+/** Remove a source and everything derived from it, workspace-scoped: its passages, their
+ *  embeddings + FTS rows, the retained blob, and any SLATED moments that cited a deleted
+ *  passage (a slated moment pointing at deleted content is stale). Woven/rejected moments and
+ *  drafts are history and preserved (their receipts to deleted passages simply won't resolve).
+ *  Returns how many slated moments were removed. */
+export function deleteSource(workspaceId: string, sourceId: string): { deletedMoments: number } {
+  const db = getDb();
+  let deletedMoments = 0;
+  const tx = db.transaction(() => {
+    const uids = new Set(
+      (db.prepare('SELECT id FROM utterances WHERE workspace_id = ? AND source_id = ?').all(workspaceId, sourceId) as { id: string }[]).map((r) => r.id),
+    );
+    if (uids.size > 0) {
+      const slated = db.prepare("SELECT id, utterance_ids FROM moments WHERE workspace_id = ? AND state = 'slated'").all(workspaceId) as { id: string; utterance_ids: string }[];
+      const del = db.prepare('DELETE FROM moments WHERE id = ?');
+      for (const m of slated) {
+        const ids = JSON.parse(m.utterance_ids) as string[];
+        if (ids.some((id) => uids.has(id))) { del.run(m.id); deletedMoments++; }
+      }
+    }
+    // Derived rows keyed off the passages — delete before the passages themselves.
+    db.prepare('DELETE FROM passage_embeddings WHERE workspace_id = ? AND utterance_id IN (SELECT id FROM utterances WHERE workspace_id = ? AND source_id = ?)').run(workspaceId, workspaceId, sourceId);
+    db.prepare('DELETE FROM passage_fts WHERE workspace_id = ? AND utterance_id IN (SELECT id FROM utterances WHERE workspace_id = ? AND source_id = ?)').run(workspaceId, workspaceId, sourceId);
+    db.prepare('DELETE FROM utterances WHERE workspace_id = ? AND source_id = ?').run(workspaceId, sourceId);
+    db.prepare('DELETE FROM source_blobs WHERE workspace_id = ? AND source_id = ?').run(workspaceId, sourceId);
+    db.prepare('DELETE FROM sources WHERE workspace_id = ? AND id = ?').run(workspaceId, sourceId);
+  });
+  tx();
+  return { deletedMoments };
 }
 
 export interface SourceSummary {
@@ -501,6 +534,7 @@ function rowToPrinciple(r: Record<string, unknown>): Principle {
     version: r.version as number,
     fireCount: r.fire_count as number,
     overrideCount: r.override_count as number,
+    clusterId: (r.cluster_id as string | null) ?? null,
     createdAt: r.created_at as string,
   };
 }
@@ -523,6 +557,78 @@ export function getPrinciple(workspaceId: string, id: string): Principle | null 
 
 export function updatePrincipleStatus(workspaceId: string, id: string, status: PrincipleStatus): void {
   getDb().prepare('UPDATE principles SET status = ? WHERE workspace_id = ? AND id = ?').run(status, workspaceId, id);
+}
+
+// ---------- clusters (escape-hatch groups) ----------
+
+function rowToCluster(r: Record<string, unknown>): Cluster {
+  return {
+    id: r.id as string,
+    workspaceId: r.workspace_id as string,
+    name: r.name as string,
+    description: (r.description as string) ?? '',
+    enabled: (r.enabled as number) === 1,
+    createdAt: r.created_at as string,
+  };
+}
+
+export function listClusters(workspaceId: string): Cluster[] {
+  const rows = getDb().prepare('SELECT * FROM clusters WHERE workspace_id = ? ORDER BY created_at').all(workspaceId) as Record<string, unknown>[];
+  return rows.map(rowToCluster);
+}
+
+export function getCluster(workspaceId: string, id: string): Cluster | null {
+  const r = getDb().prepare('SELECT * FROM clusters WHERE workspace_id = ? AND id = ?').get(workspaceId, id) as Record<string, unknown> | undefined;
+  return r ? rowToCluster(r) : null;
+}
+
+export function createCluster(workspaceId: string, name: string, description = '', enabled = true): Cluster {
+  const id = newId('clu');
+  getDb()
+    .prepare('INSERT INTO clusters (id, workspace_id, name, description, enabled) VALUES (?, ?, ?, ?, ?)')
+    .run(id, workspaceId, name, description, enabled ? 1 : 0);
+  return getCluster(workspaceId, id)!;
+}
+
+export function updateCluster(workspaceId: string, id: string, patch: { name?: string; description?: string; enabled?: boolean }): void {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (patch.name !== undefined) { sets.push('name = ?'); vals.push(patch.name); }
+  if (patch.description !== undefined) { sets.push('description = ?'); vals.push(patch.description); }
+  if (patch.enabled !== undefined) { sets.push('enabled = ?'); vals.push(patch.enabled ? 1 : 0); }
+  if (sets.length === 0) return;
+  vals.push(workspaceId, id);
+  getDb().prepare(`UPDATE clusters SET ${sets.join(', ')} WHERE workspace_id = ? AND id = ?`).run(...vals);
+}
+
+/** Delete a cluster; its principles fall back to unclustered (cluster_id → NULL). */
+export function deleteCluster(workspaceId: string, id: string): void {
+  const tx = getDb().transaction(() => {
+    getDb().prepare('UPDATE principles SET cluster_id = NULL WHERE workspace_id = ? AND cluster_id = ?').run(workspaceId, id);
+    getDb().prepare('DELETE FROM clusters WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
+  });
+  tx();
+}
+
+/** Assign a principle to a cluster (or null to unassign). Validates the cluster is in-workspace. */
+export function assignPrincipleCluster(workspaceId: string, principleId: string, clusterId: string | null): void {
+  if (clusterId !== null && !getCluster(workspaceId, clusterId)) throw new Error(`Cluster ${clusterId} not found in workspace.`);
+  getDb().prepare('UPDATE principles SET cluster_id = ? WHERE workspace_id = ? AND id = ?').run(clusterId, workspaceId, principleId);
+}
+
+/** Cluster ids that are currently DISABLED — the escape hatch. Their principles are suspended
+ *  from conditioning new drafts (weave), regardless of the principle's own status. */
+export function disabledClusterIds(workspaceId: string): Set<string> {
+  const rows = getDb().prepare('SELECT id FROM clusters WHERE workspace_id = ? AND enabled = 0').all(workspaceId) as { id: string }[];
+  return new Set(rows.map((r) => r.id));
+}
+
+/** Member count per cluster (all statuses), for the UI. */
+export function clusterMemberCounts(workspaceId: string): Map<string, number> {
+  const rows = getDb()
+    .prepare('SELECT cluster_id, COUNT(*) AS n FROM principles WHERE workspace_id = ? AND cluster_id IS NOT NULL GROUP BY cluster_id')
+    .all(workspaceId) as { cluster_id: string; n: number }[];
+  return new Map(rows.map((r) => [r.cluster_id, r.n]));
 }
 
 /** Constitution version = count of status transitions to active/shadow, monotonic-ish for Phase 0. */

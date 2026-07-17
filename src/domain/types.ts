@@ -179,6 +179,16 @@ export interface Principle {
   version: number;
   fireCount: number;
   overrideCount: number;
+  clusterId: string | null;
+  createdAt: string;
+}
+
+export interface Cluster {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description: string;
+  enabled: boolean;
   createdAt: string;
 }
 

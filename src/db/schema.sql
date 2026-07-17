@@ -125,9 +125,23 @@ CREATE TABLE IF NOT EXISTS principles (
   version INTEGER NOT NULL DEFAULT 1,
   fire_count INTEGER NOT NULL DEFAULT 0,
   override_count INTEGER NOT NULL DEFAULT 0,
+  cluster_id TEXT,                        -- optional grouping (nullable = unclustered)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_principles_ws ON principles(workspace_id, status);
+
+-- Principle clusters: named groups toggled on/off as a temporary "escape hatch". Disabling a
+-- cluster suspends its ACTIVE principles from conditioning new drafts (weave) without changing
+-- their status — re-enable to restore. Grouping is LLM-proposed (semantic; Rule 18) or manual.
+CREATE TABLE IF NOT EXISTS clusters (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,     -- 0 = escape hatch engaged (suspended from generation)
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_clusters_ws ON clusters(workspace_id);
 
 CREATE TABLE IF NOT EXISTS counterfactual_results (
   id TEXT PRIMARY KEY,

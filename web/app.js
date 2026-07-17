@@ -289,18 +289,59 @@ const clampSel = (count) => {
   state.sel = Math.max(0, Math.min(state.sel, Math.max(0, count - 1)));
 };
 
+/* ---------- per-page help (collapsible "How this works") ---------- */
+
+const HELP = {
+  slate: {
+    title: 'How the Slate works',
+    body: `<p><strong>The Slate is your daily publishing queue.</strong> The system mines your admitted corpus for <em>moments</em> — specific, publishable insights someone actually said or wrote — ranks them by novelty × credibility, and shows the top few. Everything here is grounded: each card carries the receipt chips it came from.</p>
+      <p><strong>Per card, do one thing:</strong> <em>Weave</em> it into a draft (choose a format + template), or <em>Reject</em> it with a reason. Rejections are the most valuable signal in the system — the distiller learns your taste from what you kill, so reject deliberately, not by ignoring.</p>
+      <p><strong>Use it well:</strong> work top-down, clear the slate daily (the attention-budget bar is the promise that it fits). Added new corpus docs? Hit <em>↻ Re-extract</em> to mine them — already-seen moments are skipped. If the slate feels off-target, that's a constitution problem, not a slate problem — reject a few with reasons and distill.</p>`,
+  },
+  constitution: {
+    title: 'How the Constitution works',
+    body: `<p><strong>The Constitution is your editing taste, turned into enforceable rules.</strong> <em>Distill</em> reads recurring edits and rejections and proposes candidate <em>principles</em> (“cut throat-clearing openers”). You never accept a rule because it reads well — <em>Run counterfactuals</em> shows what it <em>would have done</em> to your recent drafts, as diffs. If its <em>blast radius</em> (out-of-scope drafts changed) exceeds 10%, Accept locks.</p>
+      <p><strong>Lifecycle, enforced server-side:</strong> candidate → <em>shadow</em> (a week of observation, annotates but doesn't steer) → <em>active</em> (conditions every new draft). Kill or roll back any principle in one step.</p>
+      <p><strong>Clusters &amp; the escape hatch:</strong> group active principles into themes (“Tone &amp; voice”, “Compliance guardrails”) and toggle a whole theme <em>off</em> temporarily. A disabled cluster stops conditioning new drafts <em>without</em> changing any principle's status — the escape hatch for a one-off piece that needs to break the house style. Re-enable and it's back, no re-ratification. Use <em>Auto-cluster</em> to have the system propose themes; rename or reassign freely.</p>`,
+  },
+  gate: {
+    title: 'How the Gate works',
+    body: `<p><strong>The Gate is the Phase-0 scoreboard</strong> — the pre-registered thresholds that decide whether the distillation loop actually works (SYNTHESIS.md §4). It is honest by design: <strong>⬜ means “not yet measurable,” not “broken.”</strong></p>
+      <p><strong>What each metric means:</strong> <em>acceptance</em> — how often woven drafts ship with few edits (≥60%); <em>edit-recurrence ↓</em> — the same correction should stop recurring once a principle covers it (≥30% drop); <em>blast &lt;10%</em> — principles stay in scope; <em>coverage ≥50%</em> — enough of your edits are captured as rules.</p>
+      <p><strong>Use it well:</strong> this is the read-only truth check, not a control panel. To move a metric, act upstream — capture more edits (coverage), distill + ratify (recurrence), tighten principle scope (blast). Blind exec preference and cross-client isolation are verified with a design partner, not computed here.</p>`,
+  },
+};
+
+function helpPanel(key) {
+  const h = HELP[key];
+  if (!h) return '';
+  const open = (localStorage.getItem(`nf.help.${key}`) ?? 'open') === 'open';
+  return `<details class="pagehelp" data-help="${key}"${open ? ' open' : ''}>
+    <summary class="pagehelp-summary"><span class="pagehelp-q" aria-hidden="true">?</span>${esc(h.title)}</summary>
+    <div class="pagehelp-body">${h.body}</div>
+  </details>`;
+}
+
+function wireHelp(view) {
+  $$('.pagehelp', view).forEach((d) =>
+    d.addEventListener('toggle', () => localStorage.setItem(`nf.help.${d.dataset.help}`, d.open ? 'open' : 'closed')),
+  );
+}
+
 async function renderSlate(view, stale) {
   const moments = await api(`${state.ws}/slate?top=5`);
   if (stale()) return;
   clampSel(moments.length);
   setBudget(moments.length * 4);
   if (moments.length === 0) {
-    view.innerHTML = `<div class="empty">The slate is clear.<div class="hint">Ingest a source and extract to mine new moments — or re-extract to pick up newly added corpus docs.</div></div>
+    view.innerHTML = helpPanel('slate') + `<div class="empty">The slate is clear.<div class="hint">Ingest a source and extract to mine new moments — or re-extract to pick up newly added corpus docs.</div></div>
       <div style="text-align:center"><button class="primary" id="extract-btn">Extract moments</button></div>`;
+    wireHelp(view);
     $('#extract-btn', view)?.addEventListener('click', (e) => extractAndRender(e.target));
     return;
   }
   view.innerHTML =
+    helpPanel('slate') +
     `<div class="slate-toolbar">
        <span class="slate-toolbar-note">Added corpus docs? Re-extract to mine them — already-extracted moments are skipped.</span>
        <button class="secondary" id="reextract-btn" title="Re-mine the admitted corpus (dedup-on-write)">↻ Re-extract</button>
@@ -343,6 +384,7 @@ async function renderSlate(view, stale) {
   });
 
   $('#reextract-btn', view)?.addEventListener('click', (e) => extractAndRender(e.target));
+  wireHelp(view);
 }
 
 /** Run extraction (dedup-on-write) and refresh, with an honest new/skipped toast. */
@@ -532,26 +574,46 @@ async function renderDraftDetail(view, id, stale) {
 
 async function renderConstitution(view, stale) {
   if (state.detail?.kind === 'principle') return renderPrincipleDetail(view, state.detail.id, stale);
-  const principles = await api(`${state.ws}/constitution`);
+  const [principles, clusters] = await Promise.all([
+    api(`${state.ws}/constitution`),
+    api(`${state.ws}/clusters`).catch(() => []),
+  ]);
   if (stale()) return;
-  const distillBtn = `<div style="text-align:right;margin-bottom:14px"><button class="secondary" id="distill-btn">Distill new candidates from edits</button></div>`;
+  const clusterMap = Object.fromEntries(clusters.map((c) => [c.id, c]));
+  const suspended = (p) => p.clusterId && clusterMap[p.clusterId] && !clusterMap[p.clusterId].enabled;
+
+  const toolbar = `<div class="const-toolbar">
+    <span class="const-toolbar-note">Distill turns your edits into rules; cluster them into themes you can toggle.</span>
+    <div class="const-toolbar-actions">
+      <button class="secondary" id="autocluster-btn" title="Group principles into themes (LLM)">◧ Auto-cluster</button>
+      <button class="secondary" id="newcluster-btn">+ Cluster</button>
+      <button class="secondary" id="distill-btn">Distill from edits</button>
+    </div>
+  </div>`;
+
+  const clustersSection = clustersHtml(clusters);
+
+  let body;
   if (principles.length === 0) {
-    view.innerHTML = `${distillBtn}<div class="empty">The constitution is unwritten.<div class="hint">Capture a few edits on drafts, then distill.</div></div>`;
+    body = `<div class="empty">The constitution is unwritten.<div class="hint">Capture a few edits on drafts, then distill.</div></div>`;
   } else {
     const order = { candidate: 0, shadow: 1, active: 2, decaying: 3, retired: 4, rejected: 5 };
     principles.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
     clampSel(principles.length);
-    view.innerHTML =
-      distillBtn +
-      principles
-        .map(
-          (p, i) => `
-      <article class="card ${i === state.sel ? 'selected' : ''}" data-idx="${i}" data-id="${esc(p.id)}">
+    body = principles
+      .map((p, i) => {
+        const susp = suspended(p);
+        const clusterOpts = [`<option value=""${p.clusterId ? '' : ' selected'}>— no cluster —</option>`]
+          .concat(clusters.map((c) => `<option value="${esc(c.id)}"${p.clusterId === c.id ? ' selected' : ''}>${esc(c.name)}</option>`))
+          .join('');
+        return `
+      <article class="card ${i === state.sel ? 'selected' : ''}${susp ? ' suspended' : ''}" data-idx="${i}" data-id="${esc(p.id)}">
         <div class="meta-row">
           <span class="pill ${esc(p.status)}">${esc(p.status)}</span>
           <span class="pill neutral">${esc(TIER_LABEL[p.tier] ?? p.tier)}</span>
           <span class="pill neutral">scope: ${esc(p.scope.channel ? fmtLabel(p.scope.channel) : 'all channels')}</span>
           ${p.blast ? `<span class="pill ${p.blast.radius > 0.1 ? 'risk' : 'active'}">blast ${(p.blast.radius * 100).toFixed(0)}%</span>` : ''}
+          ${susp ? `<span class="pill shadow" title="In a disabled cluster — not conditioning new drafts">⏸ suspended</span>` : ''}
         </div>
         <p class="principle-text">${esc(p.text)}</p>
         <p class="counterexample">Does not apply: ${p.counterexamples.map(esc).join(' · ')}</p>
@@ -560,40 +622,59 @@ async function renderConstitution(view, stale) {
           ${p.status === 'candidate' ? `<button class="primary act-ratify">Run counterfactuals</button>` : ''}
           ${p.status === 'shadow' ? `<button class="primary act-promote">Promote to active</button>` : ''}
           ${['candidate', 'shadow'].includes(p.status) ? `<button class="danger-link act-reject-p">Reject</button>` : ''}
+          <label class="cluster-assign">cluster <select class="act-assign" aria-label="Assign to cluster">${clusterOpts}</select></label>
         </div>
-      </article>`,
-        )
-        .join('');
-
-    principles.forEach((p, i) => {
-      const card = $(`[data-idx="${i}"]`, view);
-      $('.act-open', card).addEventListener('click', () => { state.detail = { kind: 'principle', id: p.id }; render(); });
-      $('.act-ratify', card)?.addEventListener('click', (e) =>
-        busy(e.target.closest('button'), async () => {
-          const r = await api(`${state.ws}/principles/${p.id}/ratify`, { method: 'POST' });
-          toast(`Counterfactuals run — blast radius ${(r.blast.radius * 100).toFixed(0)}%`);
-          state.detail = { kind: 'principle', id: p.id };
-          render();
-        }),
-      );
-      $('.act-promote', card)?.addEventListener('click', (e) =>
-        busy(e.target.closest('button'), async () => {
-          await api(`${state.ws}/principles/${p.id}/promote`, { method: 'POST' });
-          toast(`${p.id} is now active`);
-          render();
-        }),
-      );
-      $('.act-reject-p', card)?.addEventListener('click', async () => {
-        try {
-          await api(`${state.ws}/principles/${p.id}/reject`, { method: 'POST' });
-          toast(`${p.id} rejected`);
-          render();
-        } catch (e) {
-          toast(e.message, true);
-        }
-      });
-    });
+      </article>`;
+      })
+      .join('');
   }
+
+  view.innerHTML = helpPanel('constitution') + toolbar + clustersSection + body;
+  wireHelp(view);
+
+  // cluster section wiring
+  wireClusters(view);
+
+  // per-principle wiring
+  principles.forEach((p, i) => {
+    const card = $(`[data-idx="${i}"]`, view);
+    if (!card) return;
+    $('.act-open', card).addEventListener('click', () => { state.detail = { kind: 'principle', id: p.id }; render(); });
+    $('.act-ratify', card)?.addEventListener('click', (e) =>
+      busy(e.target.closest('button'), async () => {
+        const r = await api(`${state.ws}/principles/${p.id}/ratify`, { method: 'POST' });
+        toast(`Counterfactuals run — blast radius ${(r.blast.radius * 100).toFixed(0)}%`);
+        state.detail = { kind: 'principle', id: p.id };
+        render();
+      }),
+    );
+    $('.act-promote', card)?.addEventListener('click', (e) =>
+      busy(e.target.closest('button'), async () => {
+        await api(`${state.ws}/principles/${p.id}/promote`, { method: 'POST' });
+        toast(`${p.id} is now active`);
+        render();
+      }),
+    );
+    $('.act-reject-p', card)?.addEventListener('click', async () => {
+      try {
+        await api(`${state.ws}/principles/${p.id}/reject`, { method: 'POST' });
+        toast(`${p.id} rejected`);
+        render();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    });
+    $('.act-assign', card)?.addEventListener('change', async (e) => {
+      try {
+        await api(`${state.ws}/principles/${p.id}/cluster`, { method: 'POST', body: { clusterId: e.target.value || null } });
+        toast(e.target.value ? 'Assigned to cluster.' : 'Removed from cluster.');
+        render();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+  });
+
   $('#distill-btn', view)?.addEventListener('click', (e) =>
     busy(e.target.closest('button'), async () => {
       const created = await api(`${state.ws}/distill`, { method: 'POST' });
@@ -601,6 +682,80 @@ async function renderConstitution(view, stale) {
       render();
     }),
   );
+  $('#autocluster-btn', view)?.addEventListener('click', (e) =>
+    busy(e.target.closest('button'), async () => {
+      const r = await api(`${state.ws}/cluster-principles`, { method: 'POST' });
+      toast(r.created.length > 0 ? `${r.created.length} cluster(s) proposed · ${r.assigned} principle(s) grouped` : 'Nothing to cluster');
+      render();
+    }),
+  );
+  $('#newcluster-btn', view)?.addEventListener('click', async () => {
+    const name = prompt('New cluster name (e.g. "Tone & voice"):');
+    if (!name || !name.trim()) return;
+    try {
+      await api(`${state.ws}/clusters`, { method: 'POST', body: { name: name.trim() } });
+      toast('Cluster created.');
+      render();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+}
+
+/** The clusters panel — each a toggle row (the escape hatch), with member count, rename, delete. */
+function clustersHtml(clusters) {
+  if (clusters.length === 0) {
+    return `<div class="clusters-empty">No clusters yet. <strong>Auto-cluster</strong> to group principles into toggleable themes, or add one manually. Disabling a cluster suspends its active principles from new drafts — a temporary escape hatch.</div>`;
+  }
+  const rows = clusters
+    .map(
+      (c) => `
+      <div class="cluster-row ${c.enabled ? '' : 'off'}" data-id="${esc(c.id)}">
+        <button class="cluster-switch" role="switch" aria-checked="${c.enabled}" title="${c.enabled ? 'Enabled — conditioning drafts' : 'Escape hatch engaged — suspended from generation'}">
+          <span class="cluster-switch-track"><span class="cluster-switch-thumb"></span></span>
+        </button>
+        <div class="cluster-main">
+          <div class="cluster-name">${esc(c.name)}</div>
+          ${c.description ? `<div class="cluster-desc">${esc(c.description)}</div>` : ''}
+        </div>
+        <span class="pill neutral">${c.memberCount} principle${c.memberCount === 1 ? '' : 's'}</span>
+        ${c.enabled ? '' : '<span class="pill shadow" title="Escape hatch engaged">⏸ suspended</span>'}
+        <button class="ghost cluster-rename" title="Rename">rename</button>
+        <button class="danger-link cluster-delete" title="Delete cluster (principles become unclustered)">✕</button>
+      </div>`,
+    )
+    .join('');
+  return `<div class="clusters-panel">
+    <div class="clusters-head"><span class="section-label" style="margin:0">Clusters</span><span class="clusters-hint">toggle a theme off to suspend it from new drafts</span></div>
+    ${rows}
+  </div>`;
+}
+
+function wireClusters(view) {
+  $$('.cluster-row', view).forEach((row) => {
+    const id = row.dataset.id;
+    $('.cluster-switch', row)?.addEventListener('click', async (e) => {
+      const on = e.currentTarget.getAttribute('aria-checked') === 'true';
+      try {
+        await api(`${state.ws}/clusters/${id}`, { method: 'POST', body: { enabled: !on } });
+        toast(!on ? 'Cluster enabled — conditioning drafts again.' : 'Cluster suspended — escape hatch engaged.');
+        render();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
+    $('.cluster-rename', row)?.addEventListener('click', async () => {
+      const name = prompt('Rename cluster:', $('.cluster-name', row).textContent);
+      if (!name || !name.trim()) return;
+      try { await api(`${state.ws}/clusters/${id}`, { method: 'POST', body: { name: name.trim() } }); render(); }
+      catch (err) { toast(err.message, true); }
+    });
+    $('.cluster-delete', row)?.addEventListener('click', async () => {
+      if (!confirm('Delete this cluster? Its principles become unclustered (they are not deleted).')) return;
+      try { await api(`${state.ws}/clusters/${id}`, { method: 'DELETE' }); toast('Cluster deleted.'); render(); }
+      catch (err) { toast(err.message, true); }
+    });
+  });
 }
 
 async function renderPrincipleDetail(view, id, stale) {
@@ -689,7 +844,7 @@ async function renderPrincipleDetail(view, id, stale) {
 async function renderGate(view, stale) {
   const metrics = await api(`${state.ws}/gate`);
   if (stale()) return;
-  view.innerHTML = `
+  view.innerHTML = helpPanel('gate') + `
     <table class="gate-table">
       <thead><tr><th scope="col"><span class="visually-hidden">Status</span></th><th scope="col">Metric</th><th scope="col">Value</th><th scope="col">Threshold</th></tr></thead>
       <tbody>
@@ -704,6 +859,7 @@ async function renderGate(view, stale) {
     </table>
     <p class="whynow" style="margin-top:14px">⬜ not yet measurable. The gate decision (SYNTHESIS.md §4) needs every metric measured; blind exec preference and cross-client isolation are verified with the design partner.</p>
   `;
+  wireHelp(view);
 }
 
 /* ---------- corpus: the source material for this workspace ---------- */
@@ -849,6 +1005,7 @@ function drawerHtml(detail) {
     <div class="corpus-drawer-actions">
       ${dl}
       <a class="secondary corpus-dl" href="/api/${esc(state.ws)}/sources/${esc(detail.id)}/export" download>↓ Extracted text (.txt)</a>
+      <button class="danger-link corpus-delete" data-id="${esc(detail.id)}">Delete source</button>
     </div>
     <div class="corpus-passages">${passages}</div>`;
 }
@@ -950,6 +1107,15 @@ function wireCorpus(view) {
           const detail = await api(`${state.ws}/sources/${wrap.dataset.id}`);
           drawer.innerHTML = drawerHtml(detail);
           drawer.dataset.loaded = '1';
+          $('.corpus-delete', drawer)?.addEventListener('click', async (e) => {
+            const title = $('.corpus-title', wrap)?.textContent ?? 'this source';
+            if (!confirm(`Delete "${title}" from the corpus? Its passages, embeddings, and any pending slate moments from it are removed. This cannot be undone.`)) return;
+            await busy(e.target, async () => {
+              const r = await api(`${state.ws}/sources/${wrap.dataset.id}`, { method: 'DELETE' });
+              toast(`Source deleted${r.deletedMoments ? ` · ${r.deletedMoments} stale slate moment(s) removed` : ''}.`);
+              render();
+            });
+          });
         } catch (err) {
           drawer.innerHTML = `<div class="corpus-passages-loading">${esc(err.message)}</div>`;
         }
@@ -1131,6 +1297,29 @@ $('#ws-select').addEventListener('change', (e) => {
   switchView(state.view);
 });
 
+async function refreshWorkspaces(selectId) {
+  const workspaces = await api('workspaces');
+  const sel = $('#ws-select');
+  sel.innerHTML = workspaces.map((w) => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
+  if (selectId) { state.ws = selectId; localStorage.setItem('nf.ws', state.ws); }
+  else if (!state.ws || !workspaces.some((w) => w.id === state.ws)) state.ws = workspaces[0]?.id;
+  if (state.ws) sel.value = state.ws;
+  return workspaces;
+}
+
+$('#ws-new').addEventListener('click', async () => {
+  const name = prompt('New workspace name (e.g. "Acme Corp"):');
+  if (!name || !name.trim()) return;
+  try {
+    const w = await api('workspaces', { method: 'POST', body: { name: name.trim() } });
+    await refreshWorkspaces(w.id);
+    toast(`Workspace "${w.name}" created — start by adding sources in Corpus.`);
+    switchView('corpus');
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
 // Weave dialog wiring
 $('#weave-cancel').addEventListener('click', () => $('#weave-dialog').close());
 $('#weave-go').addEventListener('click', (e) => {
@@ -1151,13 +1340,10 @@ $('#weave-go').addEventListener('click', (e) => {
     $('#view').innerHTML = `<div class="empty">Can't reach the workbench server.<div class="hint">${esc(e.message)} — is <code>npm run ui</code> running?</div></div>`;
     return;
   }
-  const sel = $('#ws-select');
   if (workspaces.length === 0) {
-    $('#view').innerHTML = `<div class="empty">No workspaces yet.<div class="hint">Create one: <code>npm run nf -- --workspace demo init</code> then ingest a transcript.</div></div>`;
+    $('#view').innerHTML = `<div class="empty">No workspaces yet.<div class="hint">Click <strong>+</strong> next to the Workspace selector to create one, then add sources in Corpus.</div></div>`;
     return;
   }
-  sel.innerHTML = workspaces.map((w) => `<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');
-  if (!state.ws || !workspaces.some((w) => w.id === state.ws)) state.ws = workspaces[0].id;
-  sel.value = state.ws;
+  await refreshWorkspaces();
   render();
 })();

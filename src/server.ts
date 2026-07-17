@@ -21,12 +21,22 @@ import {
   updateMomentState,
   updatePrincipleStatus,
   admitSource,
+  deleteSource,
   listSources,
   listUtterances,
   insertSourceBlob,
   getSourceBlob,
+  ensureWorkspace,
+  listClusters,
+  createCluster,
+  getCluster,
+  updateCluster,
+  deleteCluster,
+  assignPrincipleCluster,
+  clusterMemberCounts,
 } from './db/index.js';
 import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
+import { clusterPrinciples } from './pipeline/clusters.js';
 import { captureEditContent } from './pipeline/edits.js';
 import { assertPrincipleTransition } from './domain/lifecycle.js';
 import { distill } from './pipeline/distill.js';
@@ -101,6 +111,19 @@ app.get('/api/workspaces', wrap((_req, res) => {
   res.json(rows);
 }));
 
+// Create a workspace. id is a slug derived from the name (the hard tenancy key); collisions
+// are rejected so an existing workspace is never silently reused under a new label.
+app.post('/api/workspaces', wrap((req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  if (name.length < 2) throw new Error('workspace name is required (min 2 chars)');
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  if (!id) throw new Error('workspace name must contain letters or digits');
+  const exists = getDb().prepare('SELECT 1 FROM workspaces WHERE id = ?').get(id);
+  if (exists) throw new Error(`workspace "${id}" already exists`);
+  ensureWorkspace(id, name);
+  res.json({ id, name });
+}));
+
 app.get('/api/templates', wrap((_req, res) => {
   res.json(TEMPLATES.map((t) => ({ id: t.id, name: t.name, blurb: t.blurb, sections: t.sections })));
 }));
@@ -157,6 +180,50 @@ app.get('/api/:ws/constitution', wrap((req, res) => {
     return { ...p, counterfactualCount: cf.length, blast: cf.length > 0 ? latestBlastRadius(ws, p.id) : null };
   });
   res.json(principles);
+}));
+
+// ---------- principle clusters (escape-hatch groups) ----------
+
+app.get('/api/:ws/clusters', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const counts = clusterMemberCounts(ws);
+  res.json(listClusters(ws).map((c) => ({ ...c, memberCount: counts.get(c.id) ?? 0 })));
+}));
+
+app.post('/api/:ws/clusters', wrap((req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  if (name.length < 2) throw new Error('cluster name is required (min 2 chars)');
+  res.json(createCluster(param(req, 'ws'), name, String(req.body?.description ?? '')));
+}));
+
+app.post('/api/:ws/clusters/:id', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const id = param(req, 'id');
+  if (!getCluster(ws, id)) return void res.status(404).json({ error: 'cluster not found' });
+  const patch: { name?: string; description?: string; enabled?: boolean } = {};
+  if (typeof req.body?.name === 'string') patch.name = req.body.name.trim();
+  if (typeof req.body?.description === 'string') patch.description = req.body.description;
+  if (typeof req.body?.enabled === 'boolean') patch.enabled = req.body.enabled;
+  updateCluster(ws, id, patch);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/:ws/clusters/:id', wrap((req, res) => {
+  deleteCluster(param(req, 'ws'), param(req, 'id'));
+  res.json({ ok: true });
+}));
+
+// Assign a principle to a cluster (clusterId null → unassign).
+app.post('/api/:ws/principles/:id/cluster', wrap((req, res) => {
+  const clusterId = req.body?.clusterId === null || typeof req.body?.clusterId === 'string' ? req.body.clusterId : undefined;
+  if (clusterId === undefined) throw new Error('clusterId (string or null) is required');
+  assignPrincipleCluster(param(req, 'ws'), param(req, 'id'), clusterId);
+  res.json({ ok: true });
+}));
+
+// Auto-cluster unclustered live principles into themes (LLM; non-destructive).
+app.post('/api/:ws/cluster-principles', wrap(async (req, res) => {
+  res.json(await clusterPrinciples(param(req, 'ws')));
 }));
 
 app.get('/api/:ws/principles/:id/report', wrap((req, res) => {
@@ -269,6 +336,12 @@ app.post('/api/:ws/ingest-doc', wrap((req, res) => {
 app.post('/api/:ws/sources/:id/admit', wrap((req, res) => {
   admitSource(param(req, 'ws'), param(req, 'id'));
   res.json({ ok: true });
+}));
+
+// Remove a source and everything derived from it (passages, embeddings, FTS, blob, stale
+// slated moments). Workspace-scoped; irreversible.
+app.delete('/api/:ws/sources/:id', wrap((req, res) => {
+  res.json(deleteSource(param(req, 'ws'), param(req, 'id')));
 }));
 
 // Source detail — passages with locators (View). Read-only; workspace-scoped.

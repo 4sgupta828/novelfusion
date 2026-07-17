@@ -26,7 +26,10 @@
 
       <div class="rail-foot">
         <label class="ws-label" for="ws-select">Workspace</label>
-        <select id="ws-select" aria-label="Workspace"></select>
+        <div class="ws-row">
+          <select id="ws-select" aria-label="Workspace"></select>
+          <button id="ws-new" class="ghost ws-new" title="Create a new workspace" aria-label="New workspace">+</button>
+        </div>
         <div class="rail-foot-buttons">
           <button id="theme-toggle" class="ghost" aria-label="Toggle theme" aria-pressed="false">◐ theme</button>
           <button id="help-btn" class="ghost" aria-haspopup="dialog">? guide</button>

@@ -75,6 +75,7 @@ export async function distill(workspaceId: string): Promise<Principle[]> {
       version: 1,
       fireCount: 0,
       overrideCount: 0,
+      clusterId: null,
       createdAt: new Date().toISOString(),
     };
     insertPrinciple(p);

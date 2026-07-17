@@ -13,6 +13,7 @@ import {
   insertDraft,
   listEdits,
   listPrinciples,
+  disabledClusterIds,
   listUtterances,
   newId,
   updateMomentState,
@@ -210,8 +211,14 @@ export async function weaveDraft(
   const src = context.map((u) => `${citedIds.has(u.id) ? '★' : ' '} ${segLabel(u)}: ${u.text}`).join('\n');
 
   const useConstitution = opts.withConstitution ?? true;
+  // Escape hatch: principles in a DISABLED cluster are suspended from conditioning (their
+  // status stays 'active' — re-enabling the cluster restores them without re-ratification).
+  const suspended = disabledClusterIds(workspaceId);
   const active = useConstitution
-    ? listPrinciples(workspaceId, 'active').filter((p) => inScope(p, format)).slice(0, config.maxInContextPrinciples)
+    ? listPrinciples(workspaceId, 'active')
+        .filter((p) => inScope(p, format))
+        .filter((p) => !(p.clusterId && suspended.has(p.clusterId)))
+        .slice(0, config.maxInContextPrinciples)
     : [];
 
   const result = await structured({
