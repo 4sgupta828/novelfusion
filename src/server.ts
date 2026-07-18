@@ -24,6 +24,10 @@ import {
   deleteSource,
   listSources,
   saveDraftInfographic,
+  listCollaborators,
+  createCollaborator,
+  getCollaborator,
+  deleteCollaborator,
   listUtterances,
   insertSourceBlob,
   getSourceBlob,
@@ -138,6 +142,24 @@ app.get('/api/config', wrap((_req, res) => {
   res.json({ flags: { corpusQuery: config.flags.corpusQuery, retainOriginals: config.flags.retainOriginals, sourceDiscovery: config.flags.sourceDiscovery } });
 }));
 
+// ---------- collaborators (named experts who author versions) ----------
+
+app.get('/api/:ws/collaborators', wrap((req, res) => {
+  res.json(listCollaborators(param(req, 'ws')));
+}));
+
+app.post('/api/:ws/collaborators', wrap((req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  if (name.length < 2) throw new Error('collaborator name is required (min 2 chars)');
+  const expertise = typeof req.body?.expertise === 'string' ? req.body.expertise.trim() : '';
+  res.json(createCollaborator(param(req, 'ws'), name, expertise));
+}));
+
+app.delete('/api/:ws/collaborators/:id', wrap((req, res) => {
+  deleteCollaborator(param(req, 'ws'), param(req, 'id'));
+  res.json({ ok: true });
+}));
+
 app.get('/api/:ws/slate', wrap((req, res) => {
   const ws = param(req, 'ws');
   const top = Number.isFinite(Number(req.query.top)) ? Number(req.query.top) : 5;
@@ -171,10 +193,14 @@ app.get('/api/:ws/drafts/:id', wrap((req, res) => {
   const d = getDraft(ws, param(req, 'id'));
   if (!d) return void res.status(404).json({ error: 'draft not found' });
   const utteranceIds = [...new Set(d.provenance.flatMap((p) => p.utteranceIds))];
+  const byId = new Map(listCollaborators(ws).map((c) => [c.id, c]));
   res.json({
     ...d,
     utterances: getUtterancesByIds(ws, utteranceIds),
-    edits: listEdits(ws).filter((e) => e.draftId === d.id),
+    // Each edit is a "version"; attach its author for display (null author = house editor).
+    edits: listEdits(ws)
+      .filter((e) => e.draftId === d.id)
+      .map((e) => ({ ...e, authorName: e.authorId ? byId.get(e.authorId)?.name ?? 'former collaborator' : 'House editor', authorExpertise: e.authorId ? byId.get(e.authorId)?.expertise ?? '' : '' })),
   });
 }));
 
@@ -250,10 +276,17 @@ app.post('/api/:ws/moments/:id/reject', wrap((req, res) => {
 }));
 
 app.post('/api/:ws/drafts/:id/edit', wrap((req, res) => {
-  const { content, reason } = req.body ?? {};
+  const ws = param(req, 'ws');
+  const { content, reason, authorId } = req.body ?? {};
   if (typeof content !== 'string' || content.trim() === '') throw new Error('Edited content is required.');
   const chip = reason == null ? null : oneOf<EditReasonChip>(reason, EDIT_REASONS, 'edit reason');
-  const e = captureEditContent(param(req, 'ws'), param(req, 'id'), content, chip);
+  // Attribute the version to a named collaborator (validated in-workspace), or the house editor.
+  let author: string | null = null;
+  if (typeof authorId === 'string' && authorId) {
+    if (!getCollaborator(ws, authorId)) throw new Error('Unknown collaborator for this workspace.');
+    author = authorId;
+  }
+  const e = captureEditContent(ws, param(req, 'id'), content, chip, author);
   res.json(e);
 }));
 

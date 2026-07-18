@@ -102,10 +102,23 @@ CREATE TABLE IF NOT EXISTS drafts (
 );
 CREATE INDEX IF NOT EXISTS idx_drafts_ws ON drafts(workspace_id, state);
 
+-- Named human collaborators (experts / SMEs) per workspace. Each can author a version of a draft
+-- via an attributed edit (per the PRD's named-person model). Phase 0 is single-user: "acting as"
+-- a collaborator is chosen in the UI, not authenticated.
+CREATE TABLE IF NOT EXISTS collaborators (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  name TEXT NOT NULL,
+  expertise TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_collaborators_ws ON collaborators(workspace_id);
+
 CREATE TABLE IF NOT EXISTS edit_events (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),
   draft_id TEXT NOT NULL REFERENCES drafts(id),
+  author_id TEXT,                       -- collaborator who authored this version (null = house editor)
   reason_chip TEXT,
   diff TEXT NOT NULL,
   edited_content TEXT NOT NULL,

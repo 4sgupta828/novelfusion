@@ -179,10 +179,20 @@ export interface Draft {
   createdAt: string;
 }
 
+export interface Collaborator {
+  id: string;
+  workspaceId: string;
+  name: string;
+  expertise: string;
+  createdAt: string;
+}
+
 export interface EditEvent {
   id: string;
   workspaceId: string;
   draftId: string;
+  /** The collaborator who authored this version, or null for the house editor. */
+  authorId: string | null;
   reasonChip: EditReasonChip | null;
   /** unified diff, original → edited */
   diff: string;

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import type {
   Cluster,
+  Collaborator,
   CounterfactualResult,
   Draft,
   EditEvent,
@@ -52,6 +53,7 @@ function migrate(d: Database.Database): void {
   ]);
   addCols('sources', [['admitted', 'INTEGER NOT NULL DEFAULT 1']]);
   addCols('principles', [['cluster_id', 'TEXT']]);
+  addCols('edit_events', [['author_id', 'TEXT']]);
 
   // Relax the old speaker NOT NULL constraint (docs/web segments have no speaker).
   // SQLite can't ALTER a column constraint, so rebuild the table. Safe: nothing has
@@ -492,10 +494,46 @@ export function listDrafts(workspaceId: string, opts: { holdout?: boolean } = {}
 export function insertEdit(e: EditEvent): void {
   getDb()
     .prepare(
-      `INSERT INTO edit_events (id, workspace_id, draft_id, reason_chip, diff, edited_content, holdout, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO edit_events (id, workspace_id, draft_id, author_id, reason_chip, diff, edited_content, holdout, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(e.id, e.workspaceId, e.draftId, e.reasonChip, e.diff, e.editedContent, e.holdout ? 1 : 0, e.createdAt);
+    .run(e.id, e.workspaceId, e.draftId, e.authorId, e.reasonChip, e.diff, e.editedContent, e.holdout ? 1 : 0, e.createdAt);
+}
+
+// ---------- collaborators (named experts / SMEs) ----------
+
+function rowToCollaborator(r: Record<string, unknown>): Collaborator {
+  return {
+    id: r.id as string,
+    workspaceId: r.workspace_id as string,
+    name: r.name as string,
+    expertise: (r.expertise as string) ?? '',
+    createdAt: r.created_at as string,
+  };
+}
+
+export function listCollaborators(workspaceId: string): Collaborator[] {
+  return (getDb().prepare('SELECT * FROM collaborators WHERE workspace_id = ? ORDER BY created_at').all(workspaceId) as Record<string, unknown>[]).map(rowToCollaborator);
+}
+
+export function getCollaborator(workspaceId: string, id: string): Collaborator | null {
+  const r = getDb().prepare('SELECT * FROM collaborators WHERE workspace_id = ? AND id = ?').get(workspaceId, id) as Record<string, unknown> | undefined;
+  return r ? rowToCollaborator(r) : null;
+}
+
+export function createCollaborator(workspaceId: string, name: string, expertise = ''): Collaborator {
+  const id = newId('collab');
+  getDb().prepare('INSERT INTO collaborators (id, workspace_id, name, expertise) VALUES (?, ?, ?, ?)').run(id, workspaceId, name, expertise);
+  return getCollaborator(workspaceId, id)!;
+}
+
+export function deleteCollaborator(workspaceId: string, id: string): void {
+  // Keep authored versions but detach them (author_id → NULL): history is never silently destroyed.
+  const tx = getDb().transaction(() => {
+    getDb().prepare('UPDATE edit_events SET author_id = NULL WHERE workspace_id = ? AND author_id = ?').run(workspaceId, id);
+    getDb().prepare('DELETE FROM collaborators WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
+  });
+  tx();
 }
 
 export function listEdits(workspaceId: string, opts: { holdout?: boolean } = {}): EditEvent[] {
@@ -511,6 +549,7 @@ export function listEdits(workspaceId: string, opts: { holdout?: boolean } = {})
     id: r.id as string,
     workspaceId: r.workspace_id as string,
     draftId: r.draft_id as string,
+    authorId: (r.author_id as string | null) ?? null,
     reasonChip: (r.reason_chip as EditEvent['reasonChip']) ?? null,
     diff: r.diff as string,
     editedContent: r.edited_content as string,

@@ -15,12 +15,14 @@ export function captureEdit(
   return captureEditContent(workspaceId, draftId, fs.readFileSync(editedFilePath, 'utf-8'), reasonChip);
 }
 
-/** Same capture path for the web UI, where the edited content arrives as a string. */
+/** Same capture path for the web UI, where the edited content arrives as a string.
+ *  authorId attributes this version to a named collaborator (null = house editor). */
 export function captureEditContent(
   workspaceId: string,
   draftId: string,
   editedRaw: string,
   reasonChip: EditReasonChip | null,
+  authorId: string | null = null,
 ): EditEvent {
   const draft = getDraft(workspaceId, draftId);
   if (!draft) throw new Error(`Draft ${draftId} not found in workspace ${workspaceId}`);
@@ -32,6 +34,7 @@ export function captureEditContent(
     id: newId('edt'),
     workspaceId,
     draftId,
+    authorId,
     reasonChip,
     diff: unifiedDiff(draftId, draft.content, edited),
     editedContent: edited,

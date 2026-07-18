@@ -687,3 +687,29 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 }
 .draft-ig-poster svg { width: 100%; height: auto; display: block; }
 .draft-ig-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+
+/* ---------- collaborators (team) ---------- */
+#team-dialog { max-width: 520px; }
+.team-list { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 14px; }
+.team-empty { color: var(--muted); font-size: 13px; line-height: 1.5; padding: 6px 0; }
+.team-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.team-row-main { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.team-name { font-family: var(--serif); font-size: 15px; color: var(--ink); }
+.team-expertise { font-size: 12px; color: var(--muted); }
+.team-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.team-form input { flex: 1; min-width: 140px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 11px; font-size: 13.5px; color: var(--ink); font-family: var(--sans); }
+.team-form input:focus { outline: none; border-color: var(--pencil); }
+
+/* editor: "editing as" author selector */
+.editor-author { display: flex; align-items: center; gap: 10px; margin: 8px 0 10px; flex-wrap: wrap; }
+.editor-author select { background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13.5px; color: var(--ink); font-family: var(--sans); }
+.editor-manage-team { font-size: 11.5px; }
+
+/* versions (attributed edits) */
+.version { margin-bottom: 16px; }
+.version-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.version-author { font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--ink); }
+.version-expertise { font-family: var(--mono); font-size: 10.5px; color: var(--pencil); background: var(--pencil-soft); padding: 2px 7px; border-radius: 999px; }
+.version-reason { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.version-toggle { margin-left: auto; font-size: 11.5px; }
+.version-full { margin-top: 8px; border-left: 2px solid var(--line-strong); padding-left: 12px; }

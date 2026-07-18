@@ -52,6 +52,7 @@ function applyDraftHash() {
     state.ws = p.ws;
     localStorage.setItem('nf.ws', state.ws);
     sel.value = state.ws;
+    loadCollaborators(); // switching workspace via a link must refresh the collaborator set
   }
   state.view = 'drafts';
   state.detail = { kind: 'draft', id: p.draftId };
@@ -846,7 +847,7 @@ async function renderDrafts(view, stale) {
 }
 
 async function renderDraftDetail(view, id, stale) {
-  const d = await api(`${state.ws}/drafts/${id}`);
+  const [d] = await Promise.all([api(`${state.ws}/drafts/${id}`), loadCollaborators()]); // author selector needs the current ws's collaborators
   if (stale()) return;
   view.innerHTML = `
     <button class="backlink" id="back">← All drafts</button>
@@ -866,7 +867,15 @@ async function renderDraftDetail(view, id, stale) {
       <button class="secondary" id="copy-link-btn" title="Copy a link that opens this draft">⧉ Copy link</button>
     </div>
     <div id="editor-zone" hidden>
-      <div class="section-label">Your edit becomes policy</div>
+      <div class="section-label">Your edit becomes a version — and policy</div>
+      <label class="editor-author">
+        <span class="ws-label">Editing as</span>
+        <select id="editor-author" aria-label="Editing as">
+          <option value="">House editor</option>
+          ${(state.collaborators || []).map((c) => `<option value="${esc(c.id)}">${esc(c.name)}${c.expertise ? ` — ${esc(c.expertise)}` : ''}</option>`).join('')}
+        </select>
+        <button type="button" class="ghost editor-manage-team" title="Manage collaborators">＋ experts</button>
+      </label>
       <textarea class="draft-editor" id="editor" aria-label="Edited draft">${esc(d.content)}</textarea>
       <fieldset class="reason-set">
         <legend class="ws-label">Reason</legend>
@@ -884,7 +893,17 @@ async function renderDraftDetail(view, id, stale) {
         <div class="chip-row">${p.utteranceIds.map((uid) => { const u = d.utterances.find((x) => x.id === uid); return u ? chipHtml(u) : ''; }).join('')}</div>
       </div>`).join('') || '<p class="whynow">No grounded claim spans recorded for this draft.</p>'}
     </div>
-    ${d.edits.length > 0 ? `<div class="section-label">Edit history</div>${d.edits.map((e) => `<div class="diff-title">${esc(e.id)} · ${esc(e.reasonChip ?? 'unspecified')}</div>${diffHtml(e.diff)}`).join('')}` : ''}
+    ${d.edits.length > 0 ? `<div class="section-label">Versions — ${d.edits.length} edit${d.edits.length === 1 ? '' : 's'} off the base draft</div>${d.edits.map((e, i) => `
+      <div class="version" data-vidx="${i}">
+        <div class="version-head">
+          <span class="version-author">${esc(e.authorName || 'House editor')}</span>
+          ${e.authorExpertise ? `<span class="version-expertise">${esc(e.authorExpertise)}</span>` : ''}
+          <span class="version-reason">${esc(e.reasonChip ?? 'unspecified')}</span>
+          <button class="ghost version-toggle">view full version</button>
+        </div>
+        ${diffHtml(e.diff)}
+        <div class="version-full" hidden><div class="draft-prose">${esc(e.editedContent)}</div></div>
+      </div>`).join('')}` : ''}
   `;
   // Reflect the open draft in the URL (no reload) so "Copy link" and browser back work.
   history.replaceState(null, '', draftHash(state.ws, id));
@@ -917,13 +936,19 @@ async function renderDraftDetail(view, id, stale) {
   $('#save-edit', view).addEventListener('click', (ev) =>
     busy(ev.target.closest('button'), async () => {
       const reason = view.querySelector('input[name="reason"]:checked')?.value;
-      const e = await api(`${state.ws}/drafts/${id}/edit`, {
+      const authorId = $('#editor-author', view)?.value || undefined;
+      await api(`${state.ws}/drafts/${id}/edit`, {
         method: 'POST',
-        body: { content: $('#editor', view).value, reason },
+        body: { content: $('#editor', view).value, reason, authorId },
       });
-      toast(`Edit ${e.id} captured — it feeds Friday's distillation`);
+      const who = $('#editor-author', view)?.selectedOptions?.[0]?.textContent || 'House editor';
+      toast(`Version saved as ${who} — it feeds distillation.`);
       render();
     }),
+  );
+  $('.editor-manage-team', view)?.addEventListener('click', async () => { await loadCollaborators(); renderTeamList(); $('#team-dialog').showModal(); });
+  $$('.version-toggle', view).forEach((b) =>
+    b.addEventListener('click', () => { const full = $('.version-full', b.closest('.version')); full.hidden = !full.hidden; b.textContent = full.hidden ? 'view full version' : 'hide full version'; }),
   );
 }
 
@@ -1678,7 +1703,53 @@ if (localStorage.getItem('nf.theme')) document.documentElement.dataset.theme = l
 $('#ws-select').addEventListener('change', (e) => {
   state.ws = e.target.value;
   localStorage.setItem('nf.ws', state.ws);
+  loadCollaborators();
   switchView(state.view);
+});
+
+/* ---------- collaborators (named experts) ---------- */
+
+async function loadCollaborators() {
+  state.collaborators = await api(`${state.ws}/collaborators`).catch(() => []);
+  return state.collaborators;
+}
+
+function renderTeamList() {
+  const list = state.collaborators || [];
+  const el = $('#team-list');
+  el.innerHTML = list.length
+    ? list
+        .map(
+          (c) => `<div class="team-row" data-id="${esc(c.id)}">
+            <div class="team-row-main"><span class="team-name">${esc(c.name)}</span>${c.expertise ? `<span class="team-expertise">${esc(c.expertise)}</span>` : ''}</div>
+            <button class="danger-link team-remove" title="Remove collaborator">✕</button>
+          </div>`,
+        )
+        .join('')
+    : '<div class="team-empty">No collaborators yet. Add an expert below — they can then author versions of any draft.</div>';
+  $$('.team-remove', el).forEach((b) =>
+    b.addEventListener('click', async () => {
+      const id = b.closest('.team-row').dataset.id;
+      if (!confirm('Remove this collaborator? Versions they authored are kept but shown as unattributed.')) return;
+      try { await api(`${state.ws}/collaborators/${id}`, { method: 'DELETE' }); await loadCollaborators(); renderTeamList(); }
+      catch (e) { toast(e.message, true); }
+    }),
+  );
+}
+
+$('#team-btn').addEventListener('click', async () => { await loadCollaborators(); renderTeamList(); $('#team-dialog').showModal(); });
+$('#team-close').addEventListener('click', () => { $('#team-dialog').close(); if (state.detail) render(); }); // refresh the "Editing as" selector
+$('#team-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('#team-name').value.trim();
+  const expertise = $('#team-expertise').value.trim();
+  if (name.length < 2) return void toast('Enter a name (2+ characters).', true);
+  try {
+    await api(`${state.ws}/collaborators`, { method: 'POST', body: { name, expertise } });
+    $('#team-name').value = ''; $('#team-expertise').value = '';
+    await loadCollaborators(); renderTeamList();
+    toast(`${name} added as a collaborator.`);
+  } catch (err) { toast(err.message, true); }
 });
 
 async function refreshWorkspaces(selectId) {
@@ -1729,6 +1800,7 @@ $('#weave-go').addEventListener('click', (e) => {
     return;
   }
   await refreshWorkspaces();
+  await loadCollaborators();
   // Open a draft directly if the URL is a shared draft link; otherwise the default view.
   if (!applyDraftHash()) render();
 })();

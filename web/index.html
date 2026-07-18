@@ -31,6 +31,7 @@
           <button id="ws-new" class="ghost ws-new" title="Create a new workspace" aria-label="New workspace">+</button>
         </div>
         <div class="rail-foot-buttons">
+          <button id="team-btn" class="ghost" aria-haspopup="dialog" title="Manage workspace collaborators">◍ team</button>
           <button id="theme-toggle" class="ghost" aria-label="Toggle theme" aria-pressed="false">◐ theme</button>
           <button id="help-btn" class="ghost" aria-haspopup="dialog">? guide</button>
         </div>
@@ -89,6 +90,20 @@
       <tr><td><kbd>esc</kbd></td><td>cancel rejection · close · back</td></tr>
     </table>
     <form method="dialog"><button class="primary">Close</button></form>
+  </dialog>
+
+  <dialog id="team-dialog" aria-labelledby="team-title">
+    <h2 id="team-title">Workspace collaborators</h2>
+    <p class="weave-lede">Named experts and SMEs who can author versions of a draft with their edits. Every version they save is attributed to them and feeds the editorial constitution.</p>
+    <div id="team-list" class="team-list"></div>
+    <form id="team-form" class="team-form">
+      <input type="text" id="team-name" placeholder="Name (e.g. Priya Rao)" aria-label="Collaborator name" required />
+      <input type="text" id="team-expertise" placeholder="Expertise (e.g. Regulatory strategy)" aria-label="Expertise" />
+      <button class="secondary" type="submit">+ Add</button>
+    </form>
+    <div class="weave-actions">
+      <button class="primary" id="team-close">Done</button>
+    </div>
   </dialog>
 
   <dialog id="weave-dialog" aria-labelledby="weave-title">
