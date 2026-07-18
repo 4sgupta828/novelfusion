@@ -33,7 +33,7 @@ const StubSchema = z.object({
 });
 
 const VizSchema = z.object({
-  kind: z.enum(['bar', 'pie', 'line', 'table', 'stat']),
+  kind: z.enum(['bar', 'pie', 'line', 'table', 'stat', 'scatter', 'quadrant', 'grouped_bar', 'stacked_bar']),
   title: z.string(),
   caption: z.string().describe('One line: what the figure shows and why it matters'),
   unit: z.string().nullable().describe("Unit for values, e.g. '$', '%', 'min' — null if none"),
@@ -41,11 +41,27 @@ const VizSchema = z.object({
   series: z
     .array(z.object({ label: z.string(), value: z.number() }))
     .nullable()
-    .describe('For bar/pie/line/stat: labeled numeric values. null for table.'),
+    .describe('For bar/pie/line/stat: labeled numeric values. null otherwise.'),
   table: z
     .object({ columns: z.array(z.string()), rows: z.array(z.array(z.string())) })
     .nullable()
     .describe('For table kind: header + data rows. null otherwise.'),
+  points: z
+    .array(z.object({ label: z.string(), x: z.number(), y: z.number(), group: z.string().nullable() }))
+    .nullable()
+    .describe('For scatter/quadrant: named points on two axes. group (or null) colors them. null otherwise.'),
+  axes: z
+    .object({ x: z.string(), y: z.string() })
+    .nullable()
+    .describe('For scatter/quadrant/grouped_bar/stacked_bar: x and y axis labels. null otherwise.'),
+  quadrants: z
+    .array(z.string())
+    .nullable()
+    .describe('For quadrant only: exactly 4 labels in order [top-left, top-right, bottom-left, bottom-right]. null otherwise.'),
+  groups: z
+    .array(z.object({ label: z.string(), values: z.array(z.object({ name: z.string(), value: z.number() })) }))
+    .nullable()
+    .describe('For grouped_bar/stacked_bar: each category label carries several named series values. null otherwise.'),
   utteranceIds: z.array(z.string()).describe('Source utterance IDs (verbatim) the FIGURES came from'),
 });
 
@@ -180,11 +196,16 @@ function templateBlock(template: ContentTemplate): string {
   );
 }
 
-const VIZ_GUIDANCE = `\n\nFIGURES — emit charts/tables ONLY when the source contains real quantitative data a figure genuinely clarifies (a ratio, a breakdown, a before/after, a trend, a headline number). Rules:
-- Never fabricate or estimate numbers. Every value must come from the source utterances; put those utterance IDs in the figure's utteranceIds.
-- Pick the form by the data's job: 'bar' to compare magnitudes across categories, 'pie' for parts of a whole (2–5 slices), 'line' for change over time, 'table' for a small labeled matrix, 'stat' for a single headline number.
+const VIZ_GUIDANCE = `\n\nFIGURES — emit charts/tables ONLY when the source genuinely supports them. Every figure is grounded: put the source utterance IDs it came from in utteranceIds. Rules:
+- Never fabricate, estimate, or infer numbers or positions. Every value and every plotted position must come from what the source states.
+- Pick the form by the data's job:
+  · 'stat' — a single headline number.
+  · 'bar' — compare magnitudes across categories. 'pie' — parts of a whole (2–5 slices). 'line' — change over time.
+  · 'grouped_bar' — compare several named series across categories (each category in "groups" carries multiple {name,value}). 'stacked_bar' — composition within each category (same shape; parts sum to the whole).
+  · 'scatter' — two metrics plotted against each other to show a relationship (points: {label,x,y}; set axes {x,y}). Use ONLY when the source gives BOTH metrics for each named item.
+  · 'quadrant' (MARKET MAP) — named players positioned on two named dimensions, split into four quadrants (points: {label,x,y,group?}; axes {x,y}; quadrants: 4 corner labels). Use ONLY when the source itself positions the players on those two dimensions — via real metrics it states, or an explicit framing it makes (e.g. it literally sorts players into named groups on two axes). NEVER invent where a company sits. If the source doesn't place them, do not build a market map.
 - Set afterSection to the section key the figure supports. Give every figure a title and a one-line caption.
-- Prefer at most 1–2 figures. If the source has no hard numbers, return an empty figures list — a figure with no real data is worse than none.`;
+- Prefer at most 1–3 figures. A figure with fabricated or guessed data is far worse than no figure — when in doubt, omit it.`;
 
 export async function weaveDraft(
   workspaceId: string,
@@ -283,6 +304,10 @@ export async function weaveDraft(
       afterSection: v.afterSection ?? undefined,
       series: v.series ?? undefined,
       table: v.table ?? undefined,
+      points: v.points ?? undefined,
+      axes: v.axes ?? undefined,
+      quadrants: v.quadrants ?? undefined,
+      groups: v.groups ?? undefined,
       utteranceIds: v.utteranceIds.filter((id) => validIds.has(id)),
     }));
 
@@ -309,8 +334,15 @@ export async function weaveDraft(
 
 /** Code owns structure: drop a figure that carries no usable data (Rule 18 —
  *  the model decides IF a figure is warranted; code enforces that it isn't empty). */
-function vizHasData(v: { series?: unknown; table?: { rows?: unknown[] } | null }): boolean {
+export function vizHasData(v: {
+  series?: unknown;
+  table?: { rows?: unknown[] } | null;
+  points?: unknown;
+  groups?: unknown;
+}): boolean {
   if (Array.isArray(v.series) && v.series.length > 0) return true;
   if (v.table && Array.isArray(v.table.rows) && v.table.rows.length > 0) return true;
+  if (Array.isArray(v.points) && v.points.length > 0) return true;
+  if (Array.isArray(v.groups) && v.groups.length > 0) return true;
   return false;
 }

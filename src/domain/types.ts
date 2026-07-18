@@ -107,7 +107,16 @@ export interface DraftSection {
   body: string;
 }
 
-export type VizKind = 'bar' | 'pie' | 'line' | 'table' | 'stat';
+export type VizKind =
+  | 'bar'
+  | 'pie'
+  | 'line'
+  | 'table'
+  | 'stat'
+  | 'scatter'      // two metrics plotted against each other (correlation / positioning)
+  | 'quadrant'     // market map: named players on two named axes, split into four quadrants
+  | 'grouped_bar'  // several series compared side-by-side across categories
+  | 'stacked_bar'; // composition across categories (parts of each whole)
 
 /** A chart the model emits when the source data warrants it. Numbers carry
  *  receipts too (utteranceIds) — the "every claim has a source" invariant
@@ -123,6 +132,14 @@ export interface VizSpec {
   series?: { label: string; value: number }[];
   /** table: header row + data rows. */
   table?: { columns: string[]; rows: string[][] };
+  /** scatter / quadrant: named points on two axes (group colors points; optional). */
+  points?: { label: string; x: number; y: number; group?: string | null }[];
+  /** scatter / quadrant / grouped_bar / stacked_bar: axis labels (x = horizontal, y = vertical). */
+  axes?: { x: string; y: string };
+  /** quadrant only: the four quadrant labels, in order [top-left, top-right, bottom-left, bottom-right]. */
+  quadrants?: string[];
+  /** grouped_bar / stacked_bar: each category carries several named series values. */
+  groups?: { label: string; values: { name: string; value: number }[] }[];
   /** Provenance: the utterances the figures came from. */
   utteranceIds: string[];
 }

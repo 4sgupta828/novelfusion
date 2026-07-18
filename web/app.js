@@ -261,6 +261,127 @@ function statHtml(series, unit) {
   return `<div class="viz-stat"><div class="viz-stat-num">${esc(fmtVal(s.value, unit))}</div><div class="viz-stat-lbl">${esc(s.label)}</div></div>`;
 }
 
+// Distinct groups → fixed categorical colors (validated 4-slot palette, order-stable).
+function groupColorMap(names) {
+  const seen = [];
+  for (const n of names) if (n != null && !seen.includes(n)) seen.push(n);
+  const map = new Map(seen.map((n, i) => [n, `var(--viz-${(i % 4) + 1})`]));
+  return { map, order: seen };
+}
+
+function legendHtml(entries) {
+  return `<div class="viz-legend">${entries
+    .map((e) => `<div class="viz-legend-row"><span class="viz-swatch" style="background:${e.color}"></span><span class="viz-cat">${esc(e.label)}</span></div>`)
+    .join('')}</div>`;
+}
+
+/** scatter + quadrant (market map): named points on two axes. quadrant adds midlines + 4 corner labels. */
+function pointPlotSvg(v, quadrant) {
+  const pts = (v.points || []).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (pts.length === 0) return '';
+  const w = 560, h = 400, padL = 54, padR = 24, padT = 24, padB = 48;
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const pad = (lo, hi) => { const s = (hi - lo) || Math.abs(hi) || 1; return [lo - s * 0.12, hi + s * 0.12]; };
+  const [x0, x1] = pad(Math.min(...xs), Math.max(...xs));
+  const [y0, y1] = pad(Math.min(...ys), Math.max(...ys));
+  const px = (x) => padL + ((x - x0) / (x1 - x0)) * (w - padL - padR);
+  const py = (y) => (h - padB) - ((y - y0) / (y1 - y0)) * (h - padT - padB);
+  const grouped = pts.some((p) => p.group);
+  const { map: colorFor, order } = groupColorMap(pts.map((p) => p.group));
+  const single = !grouped;
+
+  const midX = padL + (w - padL - padR) / 2, midY = padT + (h - padT - padB) / 2;
+  const quad = quadrant
+    ? `<line x1="${midX}" y1="${padT}" x2="${midX}" y2="${h - padB}" class="viz-quad-line"/>
+       <line x1="${padL}" y1="${midY}" x2="${w - padR}" y2="${midY}" class="viz-quad-line"/>
+       ${(v.quadrants || []).slice(0, 4).map((q, i) => {
+         const x = i % 2 === 0 ? padL + 8 : w - padR - 8;
+         const yq = i < 2 ? padT + 14 : h - padB - 8;
+         const anchor = i % 2 === 0 ? 'start' : 'end';
+         return `<text x="${x}" y="${yq}" text-anchor="${anchor}" class="viz-quad-label">${esc(q)}</text>`;
+       }).join('')}`
+    : '';
+
+  const dots = pts
+    .map((p) => {
+      const cx = px(p.x), cy = py(p.y), c = single ? 'var(--pencil)' : colorFor.get(p.group);
+      const labelRight = cx < w - padR - 80;
+      return `<circle cx="${cx}" cy="${cy}" r="6" fill="${c}" stroke="var(--surface)" stroke-width="1.5"><title>${esc(p.label)}: (${esc(fmtVal(p.x, v.unit))}, ${esc(fmtVal(p.y, v.unit))})</title></circle>
+        <text x="${cx + (labelRight ? 10 : -10)}" y="${cy}" text-anchor="${labelRight ? 'start' : 'end'}" dominant-baseline="central" class="viz-point-label">${esc(p.label)}</text>`;
+    })
+    .join('');
+
+  const axisTitles = v.axes
+    ? `<text x="${padL + (w - padL - padR) / 2}" y="${h - 8}" text-anchor="middle" class="viz-axis-title">${esc(v.axes.x)} →</text>
+       <text x="14" y="${padT + (h - padT - padB) / 2}" text-anchor="middle" class="viz-axis-title" transform="rotate(-90 14 ${padT + (h - padT - padB) / 2})">${esc(v.axes.y)} →</text>`
+    : '';
+
+  const svg = `<svg viewBox="0 0 ${w} ${h}" class="viz-svg" role="img" preserveAspectRatio="xMinYMin meet">
+    <rect x="${padL}" y="${padT}" width="${w - padL - padR}" height="${h - padT - padB}" class="viz-plot-bg"/>
+    ${quad}
+    <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" class="viz-grid"/>
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" class="viz-grid"/>
+    ${dots}${axisTitles}</svg>`;
+  const legend = grouped && order.length > 1 ? legendHtml(order.map((g) => ({ label: g, color: colorFor.get(g) }))) : '';
+  return `<div class="viz-pointplot">${svg}${legend}</div>`;
+}
+
+/** grouped_bar / stacked_bar: categories on x, several named series. Vertical bars. */
+function multiBarSvg(v, stacked) {
+  const groups = (v.groups || []).filter((g) => Array.isArray(g.values) && g.values.length > 0);
+  if (groups.length === 0) return '';
+  const seriesNames = [];
+  for (const g of groups) for (const s of g.values) if (!seriesNames.includes(s.name)) seriesNames.push(s.name);
+  const { map: colorFor } = groupColorMap(seriesNames);
+  const w = 560, padL = 48, padR = 20, padT = 22, padB = 52, h = 320;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const valOf = (g, name) => g.values.find((s) => s.name === name)?.value ?? 0;
+  const max = stacked
+    ? Math.max(...groups.map((g) => g.values.reduce((a, s) => a + Math.max(0, s.value), 0)), 1)
+    : Math.max(...groups.flatMap((g) => g.values.map((s) => s.value)), 1);
+  const bandW = plotW / groups.length;
+  const groupPad = bandW * 0.18;
+  const innerW = bandW - groupPad * 2;
+  const yTop = (val) => padT + (1 - val / max) * plotH;
+
+  const bars = groups
+    .map((g, gi) => {
+      const bx = padL + gi * bandW + groupPad;
+      if (stacked) {
+        let acc = 0;
+        return seriesNames
+          .map((name) => {
+            const val = Math.max(0, valOf(g, name));
+            if (val === 0) return '';
+            const segH = (val / max) * plotH;
+            const y = padT + (1 - (acc + val) / max) * plotH;
+            acc += val;
+            return `<rect x="${bx}" y="${y}" width="${innerW}" height="${Math.max(0, segH - 2)}" rx="3" fill="${colorFor.get(name)}"><title>${esc(g.label)} · ${esc(name)}: ${esc(fmtVal(val, v.unit))}</title></rect>`;
+          })
+          .join('');
+      }
+      const bw = innerW / seriesNames.length;
+      return seriesNames
+        .map((name, si) => {
+          const val = valOf(g, name);
+          const bh = (val / max) * plotH;
+          const x = bx + si * bw;
+          return `<rect x="${x + 1}" y="${yTop(val)}" width="${Math.max(1, bw - 2)}" height="${bh}" rx="3" fill="${colorFor.get(name)}"><title>${esc(g.label)} · ${esc(name)}: ${esc(fmtVal(val, v.unit))}</title></rect>`;
+        })
+        .join('');
+    })
+    .join('');
+  const catLabels = groups
+    .map((g, gi) => `<text x="${padL + gi * bandW + bandW / 2}" y="${h - padB + 18}" text-anchor="middle" class="viz-axis">${esc(g.label)}</text>`)
+    .join('');
+  const svg = `<svg viewBox="0 0 ${w} ${h}" class="viz-svg" role="img" preserveAspectRatio="xMinYMin meet">
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" class="viz-grid"/>
+    <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" class="viz-grid"/>
+    <text x="${padL - 8}" y="${padT + 4}" text-anchor="end" class="viz-axis">${esc(fmtVal(max, v.unit))}</text>
+    ${bars}${catLabels}</svg>`;
+  return `<div class="viz-multibar">${svg}${legendHtml(seriesNames.map((n) => ({ label: n, color: colorFor.get(n) })))}</div>`;
+}
+
 function figureHtml(v, utterances) {
   let body = '';
   if (v.kind === 'bar') body = barSvg(v.series, v.unit);
@@ -268,6 +389,10 @@ function figureHtml(v, utterances) {
   else if (v.kind === 'line') body = lineSvg(v.series, v.unit);
   else if (v.kind === 'table' && v.table) body = tableHtml(v.table);
   else if (v.kind === 'stat') body = statHtml(v.series, v.unit);
+  else if (v.kind === 'scatter') body = pointPlotSvg(v, false);
+  else if (v.kind === 'quadrant') body = pointPlotSvg(v, true);
+  else if (v.kind === 'grouped_bar') body = multiBarSvg(v, false);
+  else if (v.kind === 'stacked_bar') body = multiBarSvg(v, true);
   const chips = (v.utteranceIds || [])
     .map((id) => utterances.find((u) => u.id === id))
     .filter(Boolean)
