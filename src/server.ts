@@ -44,6 +44,7 @@ import { assertPrincipleTransition } from './domain/lifecycle.js';
 import { distill } from './pipeline/distill.js';
 import { latestBlastRadius, runCounterfactual } from './pipeline/counterfactual.js';
 import { proposeStubs, weaveDraft } from './pipeline/weave.js';
+import { suggestTemplate } from './pipeline/template-advisor.js';
 import { extractMoments } from './pipeline/moments.js';
 import { ingestUrl, ingestDocumentText, ingestUploadBuffer } from './pipeline/ingest.js';
 import { gateReport } from './report/gate.js';
@@ -425,6 +426,11 @@ app.post('/api/:ws/extract', wrap(async (req, res) => {
 
 app.post('/api/:ws/moments/:id/stubs', wrap(async (req, res) => {
   res.json(await proposeStubs(param(req, 'ws'), param(req, 'id')));
+}));
+
+// LLM recommends the best-fitting template + format for a moment, with reasoning (advisory).
+app.post('/api/:ws/moments/:id/suggest-template', wrap(async (req, res) => {
+  res.json(await suggestTemplate(param(req, 'ws'), param(req, 'id')));
 }));
 
 app.post('/api/:ws/moments/:id/weave', wrap(async (req, res) => {

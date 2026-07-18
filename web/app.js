@@ -501,7 +501,7 @@ function openWeaveDialog(momentId) {
   ).join('');
   dlg.querySelector('#weave-templates').innerHTML = templates
     .map(
-      (t, i) => `<label class="template-choice">
+      (t, i) => `<label class="template-choice" data-template="${esc(t.id)}">
         <input type="radio" name="wtemplate" value="${esc(t.id)}" ${i === 0 ? 'checked' : ''}/>
         <span class="template-choice-body">
           <span class="template-choice-name">${esc(t.name)}</span>
@@ -512,7 +512,38 @@ function openWeaveDialog(momentId) {
     )
     .join('');
   dlg.dataset.moment = momentId;
+
+  // Ask the LLM which template fits, pre-select it, and expose the reasoning. Advisory — the user
+  // can override any pick. Fails soft: on error we keep the plain freeform default silently.
+  const reco = $('#weave-reco');
+  reco.hidden = false;
+  reco.className = 'weave-reco thinking';
+  reco.innerHTML = '<span class="spin" aria-hidden="true">◌</span> Recommending a template for this moment…';
+  const seq = (openWeaveDialog._seq = (openWeaveDialog._seq || 0) + 1);
+  api(`${state.ws}/moments/${momentId}/suggest-template`, { method: 'POST' })
+    .then((s) => {
+      if (dlg.dataset.moment !== momentId || seq !== openWeaveDialog._seq) return; // stale
+      applyRecommendation(dlg, s);
+    })
+    .catch(() => {
+      if (seq !== openWeaveDialog._seq) return;
+      reco.hidden = true; // no recommendation available — plain defaults stand
+    });
+
   dlg.showModal();
+}
+
+/** Pre-select the recommended format + template and render the reasoning banner. */
+function applyRecommendation(dlg, s) {
+  const setRadio = (name, value) => { const el = dlg.querySelector(`input[name="${name}"][value="${CSS.escape(value)}"]`); if (el) el.checked = true; };
+  setRadio('wformat', s.format);
+  setRadio('wtemplate', s.template);
+  dlg.querySelectorAll('.template-choice').forEach((el) => el.classList.toggle('recommended', el.dataset.template === s.template));
+  const name = TEMPLATE_LABEL[s.template] ?? s.template;
+  const reco = $('#weave-reco');
+  reco.className = 'weave-reco';
+  reco.hidden = false;
+  reco.innerHTML = `<span class="weave-reco-badge">◧ Recommended · ${esc(name)}</span><span class="weave-reco-why">${esc(s.reasoning)}</span><span class="weave-reco-hint">Override below if you disagree.</span>`;
 }
 
 async function doWeave(momentId, format, template, btn) {
