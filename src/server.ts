@@ -43,7 +43,12 @@ import {
   deleteCluster,
   assignPrincipleCluster,
   clusterMemberCounts,
+  listIdeas,
+  getIdea,
+  updateIdeaStatus,
+  deleteIdea,
 } from './db/index.js';
+import { generateIdeaClusters, brainstormIdeas, promoteIdeaToMoment } from './pipeline/ideas.js';
 import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
 import { discoverSources } from './pipeline/discover.js';
 import { sweepFootprint } from './pipeline/footprint.js';
@@ -173,6 +178,54 @@ app.post('/api/:ws/collaborators', wrap((req, res) => {
 
 app.delete('/api/:ws/collaborators/:id', wrap((req, res) => {
   deleteCollaborator(param(req, 'ws'), param(req, 'id'));
+  res.json({ ok: true });
+}));
+
+// ---------- ideas (scratch space upstream of the slate) ----------
+
+const hydrateIdea = (ws: string, idea: import('./domain/types.js').Idea) => ({
+  ...idea,
+  utterances: getUtterancesByIdsOrdered(ws, idea.sourceUtteranceIds),
+});
+
+app.get('/api/:ws/ideas', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const status = typeof req.query.status === 'string' ? (req.query.status as import('./domain/types.js').IdeaStatus) : undefined;
+  res.json(listIdeas(ws, status).map((i) => hydrateIdea(ws, i)));
+}));
+
+app.post('/api/:ws/ideas/cluster', wrap(async (req, res) => {
+  const ws = param(req, 'ws');
+  const created = await generateIdeaClusters(ws);
+  res.json(created.map((i) => hydrateIdea(ws, i)));
+}));
+
+app.post('/api/:ws/ideas/brainstorm', wrap(async (req, res) => {
+  const ws = param(req, 'ws');
+  const prompt = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+  if (prompt.length < 3) throw new Error('a brainstorm prompt is required (min 3 chars)');
+  const authorId = typeof req.body?.authorId === 'string' && req.body.authorId ? req.body.authorId : null;
+  const refineIdeaId = typeof req.body?.refineIdeaId === 'string' && req.body.refineIdeaId ? req.body.refineIdeaId : null;
+  const created = await brainstormIdeas(ws, { prompt, authorId, refineIdeaId });
+  res.json(created.map((i) => hydrateIdea(ws, i)));
+}));
+
+app.post('/api/:ws/ideas/:id/promote', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const moment = promoteIdeaToMoment(ws, param(req, 'id'));
+  res.json({ ok: true, moment });
+}));
+
+app.post('/api/:ws/ideas/:id/dismiss', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const idea = getIdea(ws, param(req, 'id'));
+  if (!idea) return void res.status(404).json({ error: 'idea not found' });
+  updateIdeaStatus(ws, idea.id, 'dismissed');
+  res.json({ ok: true });
+}));
+
+app.delete('/api/:ws/ideas/:id', wrap((req, res) => {
+  deleteIdea(param(req, 'ws'), param(req, 'id'));
   res.json({ ok: true });
 }));
 

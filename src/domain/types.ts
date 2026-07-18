@@ -187,6 +187,27 @@ export interface Collaborator {
   createdAt: string;
 }
 
+export type IdeaOrigin = 'cluster' | 'brainstorm';
+export type IdeaStatus = 'open' | 'promoted' | 'dismissed';
+
+/** A candidate idea in the scratch space upstream of the slate. Grounded (receipts) but not yet
+ *  a Moment — promotion is the only path into the governed pipeline. */
+export interface Idea {
+  id: string;
+  workspaceId: string;
+  text: string;
+  rationale: string;
+  novelty: number; // 0..1
+  sourceUtteranceIds: string[]; // receipts, validated against the sampled/retrieved corpus
+  origin: IdeaOrigin;
+  clusterTitle: string | null; // group label for clustered ideas
+  clusterThesis: string | null; // the novel-fusion thesis/tension of the cluster
+  authorId: string | null; // collaborator lens for brainstormed ideas
+  status: IdeaStatus;
+  promotedMomentId: string | null;
+  createdAt: string;
+}
+
 /** The distilled brand voice — style plus soul — inferred from the workspace's published output.
  *  Each judgemental trait carries example utterance ids (receipts) it was inferred from. */
 export interface VoicePersonaProfile {

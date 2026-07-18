@@ -589,6 +589,12 @@ const clampSel = (count) => {
 /* ---------- per-page help (collapsible "How this works") ---------- */
 
 const HELP = {
+  ideas: {
+    title: 'How Ideas works',
+    body: `<p><strong>Ideas is a scratch space upstream of the Slate.</strong> The Slate mines your corpus for moments one at a time; Ideas steps back and looks across the whole corpus for <em>novel fusions</em> — non-obvious connections between separate threads that, combined, give you a fresh point of view worth publishing. Nothing here is committed: ideas are candidates you curate.</p>
+      <p><strong>Two ways to generate:</strong> <em>Cluster corpus</em> reads a broad sample and surfaces grouped fusions (each with a thesis + a few seed ideas). <em>Brainstorm</em> is directed — type a prompt, optionally through a named expert's lens, and get sharp angles back; you can <em>Refine</em> any idea into stronger variants. Both are grounded: every idea carries the receipt chips it rests on.</p>
+      <p><strong>Curate, then promote:</strong> the best ideas go <em>→ Slate</em> (promotion is the only path into the governed pipeline — an idea becomes a moment and thereafter weaves, edits, distills like any other). <em>Dismiss</em> the rest. Ideas never publish on their own; this is where you think, not where you ship.</p>`,
+  },
   slate: {
     title: 'How the Slate works',
     body: `<p><strong>The Slate is your daily publishing queue.</strong> The system mines your admitted corpus for <em>moments</em> — specific, publishable insights someone actually said or wrote — ranks them by novelty × credibility, and shows the top few. Everything here is grounded: each card carries the receipt chips it came from.</p>
@@ -1228,6 +1234,135 @@ async function renderPrincipleDetail(view, id, stale) {
   });
 }
 
+/* ---------- ideas: the scratch space upstream of the slate ---------- */
+
+function ideaCardHtml(idea, i) {
+  const chips = (idea.utterances || []).map(chipHtml).join('');
+  const lens = idea.authorId && (state.collaborators || []).find((c) => c.id === idea.authorId);
+  return `
+    <article class="idea-card" data-idx="${i}" data-id="${esc(idea.id)}">
+      <p class="idea-text">${esc(idea.text)}</p>
+      ${idea.rationale ? `<p class="idea-rationale">${esc(idea.rationale)}</p>` : ''}
+      <div class="idea-meta">
+        <span class="pill neutral">novelty ${(idea.novelty * 100).toFixed(0)}</span>
+        ${lens ? `<span class="idea-lens">via ${esc(lens.name)}</span>` : ''}
+      </div>
+      ${chips ? `<div class="chip-row">${chips}</div>` : '<p class="idea-nogrounds">no receipts — cannot promote</p>'}
+      <div class="idea-actions">
+        <button class="primary idea-promote"${idea.utterances?.length ? '' : ' disabled title="An idea needs receipts before it can become a moment"'}>→ Slate</button>
+        <button class="secondary idea-refine">Refine</button>
+        <button class="ghost idea-dismiss">Dismiss</button>
+      </div>
+    </article>`;
+}
+
+async function renderIdeas(view, stale) {
+  await loadCollaborators(); // brainstorm lens selector + card attribution need the ws's experts
+  const ideas = await api(`${state.ws}/ideas?status=open`);
+  if (stale()) return;
+  setBudget(0);
+
+  const experts = state.collaborators || [];
+  const toolbar = `<div class="ideas-toolbar">
+    <button class="secondary" id="cluster-ideas-btn">✦ Cluster corpus</button>
+    <form class="brainstorm-form" id="brainstorm-form">
+      <input type="text" id="brainstorm-prompt" placeholder="Brainstorm: e.g. angles on why governance beats speed…" autocomplete="off" />
+      ${experts.length ? `<select id="brainstorm-author" title="Generate through an expert's lens">
+        <option value="">no lens</option>
+        ${experts.map((c) => `<option value="${esc(c.id)}">as ${esc(c.name)}</option>`).join('')}
+      </select>` : ''}
+      <button class="primary" type="submit">Generate</button>
+    </form>
+  </div>`;
+
+  // Group by cluster (clustered ideas), then brainstormed ideas last.
+  const clustered = new Map(); // title -> { thesis, ideas: [] }
+  const brainstormed = [];
+  ideas.forEach((idea) => {
+    if (idea.origin === 'cluster' && idea.clusterTitle) {
+      const g = clustered.get(idea.clusterTitle) || { thesis: idea.clusterThesis, ideas: [] };
+      g.ideas.push(idea);
+      clustered.set(idea.clusterTitle, g);
+    } else {
+      brainstormed.push(idea);
+    }
+  });
+
+  let body;
+  if (ideas.length === 0) {
+    body = `<div class="empty">No ideas yet.<div class="hint"><strong>Cluster corpus</strong> to surface novel-fusion angles across everything you've admitted, or <strong>brainstorm</strong> a direction above. The best ideas promote to the Slate.</div></div>`;
+  } else {
+    let n = 0;
+    const groups = [];
+    for (const [title, g] of clustered) {
+      groups.push(`<section class="idea-group">
+        <div class="idea-group-head">
+          <h3 class="idea-group-title">✦ ${esc(title)}</h3>
+          ${g.thesis ? `<p class="idea-group-thesis">${esc(g.thesis)}</p>` : ''}
+        </div>
+        <div class="idea-grid">${g.ideas.map((idea) => ideaCardHtml(idea, n++)).join('')}</div>
+      </section>`);
+    }
+    if (brainstormed.length) {
+      groups.push(`<section class="idea-group">
+        <div class="idea-group-head"><h3 class="idea-group-title">Brainstormed</h3></div>
+        <div class="idea-grid">${brainstormed.map((idea) => ideaCardHtml(idea, n++)).join('')}</div>
+      </section>`);
+    }
+    body = groups.join('');
+  }
+
+  view.innerHTML = helpPanel('ideas') + toolbar + body;
+  wireHelp(view);
+
+  // Wire receipts on every card.
+  const byIdx = [];
+  [...clustered.values()].forEach((g) => g.ideas.forEach((idea) => byIdx.push(idea)));
+  brainstormed.forEach((idea) => byIdx.push(idea));
+  $$('.idea-card', view).forEach((card) => {
+    const idea = byIdx[Number(card.dataset.idx)];
+    if (!idea) return;
+    wireChips(card, idea.utterances || []);
+    $('.idea-promote', card)?.addEventListener('click', (e) =>
+      busy(e.target, async () => {
+        await api(`${state.ws}/ideas/${idea.id}/promote`, { method: 'POST' });
+        toast('Promoted to the Slate as a moment.');
+        render();
+      }),
+    );
+    $('.idea-dismiss', card)?.addEventListener('click', async () => {
+      try { await api(`${state.ws}/ideas/${idea.id}/dismiss`, { method: 'POST' }); toast('Idea dismissed.'); render(); }
+      catch (err) { toast(err.message, true); }
+    });
+    $('.idea-refine', card)?.addEventListener('click', (e) =>
+      busy(e.target, async () => {
+        const created = await api(`${state.ws}/ideas/brainstorm`, { method: 'POST', body: { prompt: `Refine and sharpen this idea into stronger variants and adjacent angles.`, refineIdeaId: idea.id, authorId: idea.authorId || undefined } });
+        toast(created.length ? `${created.length} refined idea${created.length > 1 ? 's' : ''} added.` : 'No grounded refinements found.');
+        render();
+      }),
+    );
+  });
+
+  $('#cluster-ideas-btn', view)?.addEventListener('click', (e) =>
+    busy(e.target, async () => {
+      const created = await api(`${state.ws}/ideas/cluster`, { method: 'POST' });
+      toast(created.length ? `${created.length} idea${created.length > 1 ? 's' : ''} across ${new Set(created.map((c) => c.clusterTitle)).size} cluster${new Set(created.map((c) => c.clusterTitle)).size > 1 ? 's' : ''}.` : 'No grounded fusions surfaced — try adding more corpus.');
+      render();
+    }),
+  );
+  $('#brainstorm-form', view)?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const prompt = $('#brainstorm-prompt', view).value.trim();
+    if (prompt.length < 3) { toast('Type a brainstorm prompt first.', true); return; }
+    const authorId = $('#brainstorm-author', view)?.value || undefined;
+    busy(e.submitter, async () => {
+      const created = await api(`${state.ws}/ideas/brainstorm`, { method: 'POST', body: { prompt, authorId } });
+      toast(created.length ? `${created.length} idea${created.length > 1 ? 's' : ''} added.` : 'No grounded ideas — try a different angle or add corpus.');
+      render();
+    });
+  });
+}
+
 async function renderVoice(view, stale) {
   const { persona, examples } = await api(`${state.ws}/persona`);
   if (stale()) return;
@@ -1722,6 +1857,7 @@ function renderQueryResult(out, r) {
 const VIEWS = {
   corpus: { title: 'Corpus', render: renderCorpus },
   slate: { title: 'Slate', render: renderSlate },
+  ideas: { title: 'Ideas', render: renderIdeas },
   drafts: { title: 'Drafts', render: renderDrafts },
   constitution: { title: 'Constitution', render: renderConstitution },
   voice: { title: 'Voice', render: renderVoice },
@@ -1793,7 +1929,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const viewKeys = { 1: 'corpus', 2: 'slate', 3: 'drafts', 4: 'constitution', 5: 'voice', 6: 'gate' };
+  const viewKeys = { 1: 'corpus', 2: 'slate', 3: 'ideas', 4: 'drafts', 5: 'constitution', 6: 'voice', 7: 'gate' };
   if (viewKeys[e.key]) return switchView(viewKeys[e.key]);
 
   const view = $('#view');

@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import type {
   Cluster,
   Collaborator,
+  Idea,
   VoicePersona,
   CounterfactualResult,
   Draft,
@@ -591,6 +592,75 @@ export function deleteCollaborator(workspaceId: string, id: string): void {
     getDb().prepare('DELETE FROM collaborators WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
   });
   tx();
+}
+
+// ---------- ideas (scratch space upstream of the slate) ----------
+
+function rowToIdea(r: Record<string, unknown>): Idea {
+  return {
+    id: r.id as string,
+    workspaceId: r.workspace_id as string,
+    text: r.text as string,
+    rationale: (r.rationale as string) ?? '',
+    novelty: (r.novelty as number) ?? 0.5,
+    sourceUtteranceIds: JSON.parse((r.source_utterance_ids as string) ?? '[]'),
+    origin: r.origin as Idea['origin'],
+    clusterTitle: (r.cluster_title as string) ?? null,
+    clusterThesis: (r.cluster_thesis as string) ?? null,
+    authorId: (r.author_id as string) ?? null,
+    status: r.status as Idea['status'],
+    promotedMomentId: (r.promoted_moment_id as string) ?? null,
+    createdAt: r.created_at as string,
+  };
+}
+
+export type NewIdea = Omit<Idea, 'id' | 'status' | 'promotedMomentId' | 'createdAt'>;
+
+export function insertIdea(idea: NewIdea): Idea {
+  const id = newId('idea');
+  getDb()
+    .prepare(
+      `INSERT INTO ideas (id, workspace_id, text, rationale, novelty, source_utterance_ids, origin, cluster_title, cluster_thesis, author_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      idea.workspaceId,
+      idea.text,
+      idea.rationale,
+      idea.novelty,
+      JSON.stringify(idea.sourceUtteranceIds),
+      idea.origin,
+      idea.clusterTitle,
+      idea.clusterThesis,
+      idea.authorId,
+    );
+  return getIdea(idea.workspaceId, id)!;
+}
+
+export function getIdea(workspaceId: string, id: string): Idea | null {
+  const r = getDb().prepare('SELECT * FROM ideas WHERE workspace_id = ? AND id = ?').get(workspaceId, id) as Record<string, unknown> | undefined;
+  return r ? rowToIdea(r) : null;
+}
+
+export function listIdeas(workspaceId: string, status?: Idea['status']): Idea[] {
+  const rows = (
+    status
+      ? getDb().prepare('SELECT * FROM ideas WHERE workspace_id = ? AND status = ? ORDER BY created_at DESC').all(workspaceId, status)
+      : getDb().prepare('SELECT * FROM ideas WHERE workspace_id = ? ORDER BY created_at DESC').all(workspaceId)
+  ) as Record<string, unknown>[];
+  return rows.map(rowToIdea);
+}
+
+/** Set an idea's status. When promoting, records the moment it became (traceability). */
+export function updateIdeaStatus(workspaceId: string, id: string, status: Idea['status'], promotedMomentId: string | null = null): void {
+  getDb()
+    .prepare('UPDATE ideas SET status = ?, promoted_moment_id = ? WHERE workspace_id = ? AND id = ?')
+    .run(status, promotedMomentId, workspaceId, id);
+}
+
+export function deleteIdea(workspaceId: string, id: string): void {
+  getDb().prepare('DELETE FROM ideas WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
 }
 
 export function listEdits(workspaceId: string, opts: { holdout?: boolean } = {}): EditEvent[] {

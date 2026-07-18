@@ -97,6 +97,29 @@ CREATE TABLE IF NOT EXISTS moments (
 );
 CREATE INDEX IF NOT EXISTS idx_moments_ws ON moments(workspace_id, state, score);
 
+-- Ideas: a scratch space UPSTREAM of the slate. On-demand corpus clustering and expert-lensed
+-- brainstorm land here as grounded candidate ideas; curators promote the best to a Moment (slate)
+-- or dismiss the rest. Ideas are NOT drafts and never enter approval on their own — promotion is
+-- the only path into the governed pipeline. Every idea carries receipts (source_utterance_ids)
+-- validated against the sampled/retrieved corpus (Rule 18 fail-safe); origin distinguishes a
+-- clustered idea (grouped under cluster_title) from a directed brainstorm.
+CREATE TABLE IF NOT EXISTS ideas (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  text TEXT NOT NULL,
+  rationale TEXT NOT NULL DEFAULT '',
+  novelty REAL NOT NULL DEFAULT 0.5,
+  source_utterance_ids TEXT NOT NULL DEFAULT '[]',  -- JSON array (receipts)
+  origin TEXT NOT NULL DEFAULT 'cluster',           -- 'cluster' | 'brainstorm'
+  cluster_title TEXT,                               -- group label for clustered ideas (nullable)
+  cluster_thesis TEXT,                              -- the novel-fusion thesis/tension of the cluster
+  author_id TEXT,                                   -- collaborator lens for brainstormed ideas (nullable)
+  status TEXT NOT NULL DEFAULT 'open',              -- 'open' | 'promoted' | 'dismissed'
+  promoted_moment_id TEXT,                          -- set when promoted → moment
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ideas_ws ON ideas(workspace_id, status);
+
 CREATE TABLE IF NOT EXISTS drafts (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),

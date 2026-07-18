@@ -751,3 +751,41 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 }
 .corpus-selbar #corpus-selcount { font-family: var(--mono); font-size: 12px; color: var(--pencil); font-weight: 600; }
 .corpus-selbar #corpus-delsel { margin-left: auto; }
+
+/* ---------- ideas (scratch space upstream of the slate) ---------- */
+.ideas-toolbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--line);
+}
+.ideas-toolbar #cluster-ideas-btn { flex-shrink: 0; }
+.brainstorm-form { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 280px; }
+.brainstorm-form input[type="text"] {
+  flex: 1; min-width: 160px; padding: 8px 12px; font: inherit; font-size: 13.5px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink);
+}
+.brainstorm-form input[type="text"]:focus { outline: 2px solid var(--pencil); outline-offset: -1px; border-color: var(--pencil); }
+.brainstorm-form select {
+  padding: 8px 10px; font: inherit; font-size: 12.5px; color: var(--muted);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); flex-shrink: 0;
+}
+@media (max-width: 620px) { .brainstorm-form { flex-wrap: wrap; } }
+
+.idea-group { margin-bottom: 30px; }
+.idea-group-head { margin-bottom: 14px; }
+.idea-group-title { font-family: var(--serif); font-size: 19px; margin: 0; color: var(--ink); }
+.idea-group-thesis { font-size: 13.5px; color: var(--muted); margin: 5px 0 0; max-width: 74ch; line-height: 1.5; }
+.idea-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+
+.idea-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 18px 20px; display: flex; flex-direction: column;
+  transition: border-color 0.15s ease;
+}
+.idea-card:hover { border-color: var(--line-strong); }
+.idea-text { font-family: var(--serif); font-size: 16px; line-height: 1.5; margin: 0 0 8px; color: var(--ink); }
+.idea-rationale { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 0 0 10px; }
+.idea-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.idea-lens { font-family: var(--mono); font-size: 11px; color: var(--violet); background: var(--violet-soft); border-radius: 999px; padding: 2px 9px; }
+.idea-nogrounds { font-size: 12px; color: var(--amber); font-style: italic; margin: 0 0 10px; }
+.idea-actions { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px; }
+.idea-actions .idea-dismiss { margin-left: auto; }
