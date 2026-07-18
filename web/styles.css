@@ -739,3 +739,15 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 .voice-lex-avoid { color: var(--risk); }
 .voice-belief, .voice-rule { margin-bottom: 12px; }
 .voice-receipts { margin-top: 4px; }
+
+/* ---------- corpus multi-select + bulk delete ---------- */
+.corpus-selall { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.corpus-selall input { accent-color: var(--pencil); width: 15px; height: 15px; }
+.corpus-check { accent-color: var(--pencil); width: 15px; height: 15px; flex-shrink: 0; cursor: pointer; margin-right: 2px; }
+.corpus-row-wrap.sel .corpus-row { border-color: var(--pencil); background: var(--pencil-soft); }
+.corpus-selbar {
+  display: flex; align-items: center; gap: 14px; margin: 0 0 10px; padding: 8px 14px;
+  background: var(--pencil-soft); border: 1px solid var(--pencil); border-radius: var(--radius-sm);
+}
+.corpus-selbar #corpus-selcount { font-family: var(--mono); font-size: 12px; color: var(--pencil); font-weight: 600; }
+.corpus-selbar #corpus-delsel { margin-left: auto; }

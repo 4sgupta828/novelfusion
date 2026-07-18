@@ -1342,6 +1342,9 @@ async function renderCorpus(view, stale) {
   const sources = await api(`${state.ws}/sources`);
   if (stale()) return;
   setBudget(0);
+  // Prune the multi-select set to sources that still exist (e.g. after a delete / ws switch).
+  const idSet = new Set(sources.map((s) => s.id));
+  state.corpusSel = new Set([...(state.corpusSel || [])].filter((id) => idSet.has(id)));
   const segTotal = sources.reduce((a, s) => a + s.segmentCount, 0);
 
   const queryBox = state.serverFlags?.corpusQuery
@@ -1413,13 +1416,31 @@ async function renderCorpus(view, stale) {
     ${discoverBox}
 
     <div class="corpus-list-head">
-      <span class="section-label" style="margin:0">Sources</span>
+      <label class="corpus-selall"><input type="checkbox" id="corpus-selall" aria-label="Select all sources" /> <span class="section-label" style="margin:0">Sources</span></label>
       <span class="corpus-count">${sources.length} source${sources.length === 1 ? '' : 's'} · ${segTotal} passage${segTotal === 1 ? '' : 's'}</span>
+    </div>
+    <div class="corpus-selbar" id="corpus-selbar" hidden>
+      <span id="corpus-selcount"></span>
+      <button class="danger-link" id="corpus-delsel">✕ Delete selected</button>
+      <button class="ghost" id="corpus-clearsel">Clear</button>
     </div>
     <div id="corpus-list">${sourcesHtml(sources)}</div>
   `;
 
   wireCorpus(view);
+  syncSelBar(view);
+}
+
+/** Reflect the multi-select set in the selection bar + the select-all checkbox tri-state. */
+function syncSelBar(view) {
+  const n = state.corpusSel ? state.corpusSel.size : 0;
+  const total = $$('.corpus-row-wrap', view).length;
+  const bar = $('#corpus-selbar', view);
+  if (bar) bar.hidden = n === 0;
+  const cnt = $('#corpus-selcount', view);
+  if (cnt) cnt.textContent = `${n} selected`;
+  const all = $('#corpus-selall', view);
+  if (all) { all.checked = n > 0 && n === total; all.indeterminate = n > 0 && n < total; }
 }
 
 function sourcesHtml(sources) {
@@ -1434,8 +1455,9 @@ function sourcesHtml(sources) {
         ? `<a class="corpus-uri" href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer">${esc(s.uri)}</a>`
         : `<span class="corpus-uri">${esc(s.uri || '—')}</span>`;
       return `
-      <div class="corpus-row-wrap" data-id="${esc(s.id)}">
+      <div class="corpus-row-wrap${(state.corpusSel && state.corpusSel.has(s.id)) ? ' sel' : ''}" data-id="${esc(s.id)}">
         <div class="corpus-row" role="button" tabindex="0" aria-expanded="false" title="View passages">
+          <input type="checkbox" class="corpus-check" aria-label="Select ${esc(s.title || 'source')}"${(state.corpusSel && state.corpusSel.has(s.id)) ? ' checked' : ''} />
           <span class="corpus-caret" aria-hidden="true">▸</span>
           <span class="chip ${b.cls}" data-mark="${b.mark}" aria-hidden="false">${b.label}</span>
           <div class="corpus-row-main">
@@ -1588,9 +1610,40 @@ function wireCorpus(view) {
   });
 
   // Source rows: expand to a passage drawer (fetch on first open).
+  // Multi-select + bulk delete.
+  $('#corpus-selall', view)?.addEventListener('change', (e) => {
+    const on = e.target.checked;
+    state.corpusSel = new Set(on ? $$('.corpus-row-wrap', view).map((w) => w.dataset.id) : []);
+    $$('.corpus-row-wrap', view).forEach((w) => { w.classList.toggle('sel', on); const c = $('.corpus-check', w); if (c) c.checked = on; });
+    syncSelBar(view);
+  });
+  $('#corpus-clearsel', view)?.addEventListener('click', () => {
+    state.corpusSel = new Set();
+    $$('.corpus-row-wrap', view).forEach((w) => { w.classList.remove('sel'); const c = $('.corpus-check', w); if (c) c.checked = false; });
+    syncSelBar(view);
+  });
+  $('#corpus-delsel', view)?.addEventListener('click', (e) => {
+    const ids = [...(state.corpusSel || [])];
+    if (ids.length === 0) return;
+    if (!confirm(`Delete ${ids.length} source${ids.length === 1 ? '' : 's'}? Their passages, embeddings, and any pending slate moments are removed. This cannot be undone.`)) return;
+    busy(e.target, async () => {
+      const r = await api(`${state.ws}/sources/delete`, { method: 'POST', body: { ids } });
+      state.corpusSel = new Set();
+      toast(`${r.deleted} source${r.deleted === 1 ? '' : 's'} deleted${r.deletedMoments ? ` · ${r.deletedMoments} stale slate moment(s) removed` : ''}.`);
+      render();
+    });
+  });
+
   $$('.corpus-row-wrap', view).forEach((wrap) => {
     const row = $('.corpus-row', wrap);
     const drawer = $('.corpus-drawer', wrap);
+    $('.corpus-check', wrap)?.addEventListener('click', (e) => e.stopPropagation()); // don't toggle the drawer
+    $('.corpus-check', wrap)?.addEventListener('change', (e) => {
+      state.corpusSel = state.corpusSel || new Set();
+      if (e.target.checked) state.corpusSel.add(wrap.dataset.id); else state.corpusSel.delete(wrap.dataset.id);
+      wrap.classList.toggle('sel', e.target.checked);
+      syncSelBar(view);
+    });
     $('.act-admit', wrap)?.addEventListener('click', (e) => {
       e.stopPropagation();
       busy(e.target, async () => {

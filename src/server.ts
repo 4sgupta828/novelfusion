@@ -469,6 +469,16 @@ app.delete('/api/:ws/sources/:id', wrap((req, res) => {
   res.json(deleteSource(param(req, 'ws'), param(req, 'id')));
 }));
 
+// Bulk-delete sources (multi-select in Corpus). Each cascades like the single delete.
+app.post('/api/:ws/sources/delete', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: unknown): x is string => typeof x === 'string') : [];
+  if (ids.length === 0) throw new Error('ids[] is required');
+  let deletedMoments = 0;
+  for (const id of ids) deletedMoments += deleteSource(ws, id).deletedMoments;
+  res.json({ deleted: ids.length, deletedMoments });
+}));
+
 // Source detail — passages with locators (View). Read-only; workspace-scoped.
 app.get('/api/:ws/sources/:id', wrap((req, res) => {
   const ws = param(req, 'ws');
