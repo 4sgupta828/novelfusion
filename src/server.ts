@@ -90,7 +90,17 @@ app.use('/api', (req, res, next) => {
 });
 
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(here, '..', 'web')));
+// Serve the SPA with ETags but force revalidation: `no-cache` means the browser must check with
+// the server before reusing a cached asset, so a plain reload always gets the latest app.js/CSS
+// after a redeploy (unchanged files still return a cheap 304). Without this, the no-build SPA's
+// cached JS/CSS goes stale and UI changes appear to "not show up".
+app.use(
+  express.static(path.join(here, '..', 'web'), {
+    etag: true,
+    lastModified: true,
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+  }),
+);
 
 // Request-body enum validation (panel finding: blind casts persisted arbitrary
 // strings into columns the distiller and scope matching consume as enums).
