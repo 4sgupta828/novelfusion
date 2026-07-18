@@ -713,3 +713,29 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 .version-reason { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .version-toggle { margin-left: auto; font-size: 11.5px; }
 .version-full { margin-top: 8px; border-left: 2px solid var(--line-strong); padding-left: 12px; }
+
+/* ---------- voice persona ---------- */
+.act-voice { cursor: pointer; border: 1px solid var(--line); background: none; }
+.act-voice.voice-off { color: var(--muted); }
+.act-voice.voice-on { color: var(--pencil); background: var(--pencil-soft); border-color: var(--pencil); }
+.voice-toggle-label { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+.voice-summary {
+  font-family: var(--serif); font-size: 20px; line-height: 1.4; color: var(--ink);
+  padding: 16px 20px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--pencil);
+  border-radius: var(--radius); margin-bottom: 20px; display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+}
+.voice-version { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.voice-section { margin-bottom: 22px; }
+.voice-section-title {
+  font-family: var(--sans); font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--pencil); margin: 0 0 10px;
+}
+.voice-text { font-family: var(--serif); font-size: 15px; line-height: 1.6; color: var(--ink); margin: 0 0 4px; max-width: 74ch; }
+.voice-dont { color: var(--muted); }
+.voice-chip { display: inline-block; font-family: var(--mono); font-size: 12px; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; margin: 0 6px 6px 0; }
+.voice-lex { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.voice-lex-label { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); min-width: 64px; flex-shrink: 0; }
+.voice-lex-avoid { color: var(--risk); }
+.voice-belief, .voice-rule { margin-bottom: 12px; }
+.voice-receipts { margin-top: 4px; }

@@ -601,6 +601,13 @@ const HELP = {
       <p><strong>Lifecycle, enforced server-side:</strong> candidate → <em>shadow</em> (a week of observation, annotates but doesn't steer) → <em>active</em> (conditions every new draft). Kill or roll back any principle in one step.</p>
       <p><strong>Clusters &amp; the escape hatch:</strong> group active principles into themes (“Tone &amp; voice”, “Compliance guardrails”) and toggle a whole theme <em>off</em> temporarily. A disabled cluster stops conditioning new drafts <em>without</em> changing any principle's status — the escape hatch for a one-off piece that needs to break the house style. Re-enable and it's back, no re-ratification. Use <em>Auto-cluster</em> to have the system propose themes; rename or reassign freely.</p>`,
   },
+  voice: {
+    title: 'How the Voice persona works',
+    body: `<p><strong>The Voice persona is the brand's voice and soul, distilled from its own published output.</strong> It's the third conditioning layer: the <em>corpus</em> gives you facts (with receipts), the <em>constitution</em> gives you learned taste (from your edits), and the <em>persona</em> gives you the house voice — how the brand sounds and what it believes.</p>
+      <p><strong>Build the voice corpus first:</strong> in <em>Corpus</em>, mark the sources that are the company's <em>published</em> output (blog, socials, talks) with the <em>◍ voice</em> toggle. Raw call transcripts are facts, not voice — leave those unmarked. Then hit <em>Distill</em> here.</p>
+      <p><strong>What you get:</strong> an inspectable persona — register, lexicon (what it uses / never uses), rhetoric, <em>beliefs</em> (the positions it stakes out — the soul), obsessions, and do/don'ts — each grounded in the real published passages it was inferred from (click a receipt to read them). It's versioned; re-distill as the corpus grows.</p>
+      <p><strong>Use it well:</strong> toggle it <em>on</em> to condition every new draft in the house voice (independent of the constitution — turn either off any time). It shapes <em>how</em> a grounded moment is written; it never invents facts. Note it distills from published content, so it biases toward what already exists — keep the sharpest, most distinctive pieces in the voice corpus so the persona captures the soul, not the brand average.</p>`,
+  },
   gate: {
     title: 'How the Gate works',
     body: `<p><strong>The Gate is the Phase-0 scoreboard</strong> — the pre-registered thresholds that decide whether the distillation loop actually works (SYNTHESIS.md §4). It is honest by design: <strong>⬜ means “not yet measurable,” not “broken.”</strong></p>
@@ -1221,6 +1228,66 @@ async function renderPrincipleDetail(view, id, stale) {
   });
 }
 
+async function renderVoice(view, stale) {
+  const { persona, examples } = await api(`${state.ws}/persona`);
+  if (stale()) return;
+  setBudget(0);
+  const exById = Object.fromEntries((examples || []).map((u) => [u.id, u]));
+  const receipts = (ids) => {
+    const chips = (ids || []).map((id) => exById[id]).filter(Boolean).map(chipHtml).join('');
+    return chips ? `<div class="chip-row voice-receipts">${chips}</div>` : '';
+  };
+  const chips = (xs) => (xs || []).filter(Boolean).map((x) => `<span class="voice-chip">${esc(x)}</span>`).join('');
+
+  const toolbar = `<div class="const-toolbar">
+    <span class="const-toolbar-note">The house voice, distilled from your <strong>published</strong> output. Mark voice sources in Corpus, then distill.</span>
+    <div class="const-toolbar-actions">
+      ${persona ? `<button class="cluster-switch voice-toggle" role="switch" aria-checked="${persona.enabled}" title="${persona.enabled ? 'Conditioning drafts' : 'Off — not conditioning drafts'}"><span class="cluster-switch-track"><span class="cluster-switch-thumb"></span></span></button><span class="voice-toggle-label">${persona.enabled ? 'conditioning drafts' : 'off'}</span>` : ''}
+      <button class="secondary" id="distill-persona-btn">${persona ? '↻ Re-distill' : '◍ Distill voice'}</button>
+    </div>
+  </div>`;
+
+  let body;
+  if (!persona) {
+    body = `<div class="empty">No voice persona yet.<div class="hint">In <strong>Corpus</strong>, toggle <em>◍ voice</em> on the company's published sources (blog, socials, talks), then <em>Distill voice</em>.</div></div>`;
+  } else {
+    const p = persona.profile;
+    const section = (title, inner) => inner ? `<div class="voice-section"><h3 class="voice-section-title">${esc(title)}</h3>${inner}</div>` : '';
+    body = `
+      <div class="voice-summary">${esc(p.summary || '')}<span class="voice-version">v${persona.version}${persona.enabled ? '' : ' · off'}</span></div>
+      ${section('Register', `<p class="voice-text">${esc(p.register || '')}</p>`)}
+      ${section('How it argues', `<p class="voice-text">${esc(p.rhetoric || '')}</p>`)}
+      ${section('Lexicon', `
+        ${p.lexicon?.embraces?.length ? `<div class="voice-lex"><span class="voice-lex-label">uses</span><div>${chips(p.lexicon.embraces)}</div></div>` : ''}
+        ${p.lexicon?.avoids?.length ? `<div class="voice-lex"><span class="voice-lex-label voice-lex-avoid">never</span><div>${chips(p.lexicon.avoids)}</div></div>` : ''}
+        ${p.lexicon?.signaturePhrases?.length ? `<div class="voice-lex"><span class="voice-lex-label">signature</span><div>${chips(p.lexicon.signaturePhrases)}</div></div>` : ''}`)}
+      ${section('Beliefs — the soul', (p.beliefs || []).map((b) => `<div class="voice-belief"><p class="voice-text">${esc(b.statement)}</p>${receipts(b.exampleUtteranceIds)}</div>`).join('') || '')}
+      ${section('Returns to', chips(p.obsessions))}
+      ${section('Do', (p.dos || []).map((d) => `<div class="voice-rule"><p class="voice-text">✓ ${esc(d.rule)}</p>${receipts(d.exampleUtteranceIds)}</div>`).join('') || '')}
+      ${section("Don't", (p.donts || []).map((d) => `<div class="voice-rule"><p class="voice-text voice-dont">✕ ${esc(d.rule)}</p>${receipts(d.exampleUtteranceIds)}</div>`).join('') || '')}
+    `;
+  }
+
+  view.innerHTML = helpPanel('voice') + toolbar + body;
+  wireHelp(view);
+  wireChips(view, examples || []);
+  $('#distill-persona-btn', view)?.addEventListener('click', (e) =>
+    busy(e.target.closest('button'), async () => {
+      const r = await api(`${state.ws}/persona/distill`, { method: 'POST' });
+      toast(`Voice distilled — v${r.version}. It now conditions new drafts.`);
+      render();
+    }),
+  );
+  $('.voice-toggle', view)?.addEventListener('click', async (e) => {
+    const on = e.currentTarget.getAttribute('aria-checked') === 'true';
+    try {
+      await api(`${state.ws}/persona/enabled`, { method: 'POST', body: { enabled: !on } });
+      toast(!on ? 'Voice on — conditioning drafts.' : 'Voice off — drafts won\'t use the persona.');
+      render();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
 async function renderGate(view, stale) {
   const metrics = await api(`${state.ws}/gate`);
   if (stale()) return;
@@ -1369,6 +1436,7 @@ function sourcesHtml(sources) {
           <div class="corpus-row-meta">
             <span class="pill neutral">${s.segmentCount} passage${s.segmentCount === 1 ? '' : 's'}</span>
             <span class="pill neutral">${esc(CONSENT_LABEL[s.consentBasis] ?? s.consentBasis)}</span>
+            <button class="pill act-voice ${s.isVoice ? 'voice-on' : 'voice-off'}" title="${s.isVoice ? 'Part of the voice corpus — the persona learns from this' : 'Mark as published brand voice (the persona learns from voice sources)'}">◍ voice</button>
             ${s.admitted
               ? '<span class="pill active" title="In the extraction pool">admitted</span>'
               : `<button class="secondary act-admit" title="Admit into the extraction pool">Admit</button>`}
@@ -1505,6 +1573,15 @@ function wireCorpus(view) {
         render();
       });
     });
+    $('.act-voice', wrap)?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const on = e.currentTarget.classList.contains('voice-on');
+      busy(e.currentTarget, async () => {
+        await api(`${state.ws}/sources/${wrap.dataset.id}/voice`, { method: 'POST', body: { voice: !on } });
+        toast(!on ? 'Added to the voice corpus.' : 'Removed from the voice corpus.');
+        render();
+      });
+    });
     const toggle = async () => {
       const open = row.getAttribute('aria-expanded') === 'true';
       if (open) { row.setAttribute('aria-expanded', 'false'); drawer.hidden = true; return; }
@@ -1568,6 +1645,7 @@ const VIEWS = {
   slate: { title: 'Slate', render: renderSlate },
   drafts: { title: 'Drafts', render: renderDrafts },
   constitution: { title: 'Constitution', render: renderConstitution },
+  voice: { title: 'Voice', render: renderVoice },
   gate: { title: 'Phase 0 gate', render: renderGate },
 };
 
@@ -1636,7 +1714,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const viewKeys = { 1: 'corpus', 2: 'slate', 3: 'drafts', 4: 'constitution', 5: 'gate' };
+  const viewKeys = { 1: 'corpus', 2: 'slate', 3: 'drafts', 4: 'constitution', 5: 'voice', 6: 'gate' };
   if (viewKeys[e.key]) return switchView(viewKeys[e.key]);
 
   const view = $('#view');

@@ -14,11 +14,12 @@ import {
   listEdits,
   listPrinciples,
   disabledClusterIds,
+  getActiveVoicePersona,
   listUtterances,
   newId,
   updateMomentState,
 } from '../db/index.js';
-import type { AssetFormat, Draft, Principle, Utterance, WeaveStub } from '../domain/types.js';
+import type { AssetFormat, Draft, Principle, Utterance, VoicePersona, WeaveStub } from '../domain/types.js';
 import { getTemplate, type ContentTemplate } from '../domain/templates.js';
 
 const StubSchema = z.object({
@@ -86,7 +87,29 @@ const DraftSchema = z.object({
 const STUB_SYSTEM = `You are the weaving stage of an editorial pipeline. Given one grounded "moment" (a real insight a real person said), propose distinct ways to weave it into content: angle x format x audience.
 Each proposal is ONE sentence (a pitch, not a draft). Proposals must stay faithful to what was actually said — no invented facts, no exaggeration of the claim.`;
 
-function draftSystem(principles: Principle[]): string {
+/** The voice layer — shapes HOW the piece is written (never what's true). Distilled from the
+ *  brand's published output; conditions the draft alongside grounding + the constitution. */
+function personaBlock(persona: VoicePersona | null): string {
+  if (!persona || !persona.enabled) return '';
+  const p = persona.profile;
+  const list = (xs: string[]) => xs.filter(Boolean).join('; ');
+  const lines = [
+    `\n\nBRAND VOICE (v${persona.version} — write in THIS voice; it shapes tone and framing, never the facts):`,
+    p.summary ? `- Sounds like: ${p.summary}` : '',
+    p.register ? `- Register: ${p.register}` : '',
+    p.rhetoric ? `- How it argues: ${p.rhetoric}` : '',
+    p.lexicon?.embraces?.length ? `- Uses: ${list(p.lexicon.embraces)}` : '',
+    p.lexicon?.avoids?.length ? `- NEVER uses: ${list(p.lexicon.avoids)}` : '',
+    p.lexicon?.signaturePhrases?.length ? `- Signature phrases: ${list(p.lexicon.signaturePhrases)}` : '',
+    p.beliefs?.length ? `- Believes: ${list(p.beliefs.map((b) => b.statement))}` : '',
+    p.obsessions?.length ? `- Returns to: ${list(p.obsessions)}` : '',
+    p.dos?.length ? `- Do: ${list(p.dos.map((d) => d.rule))}` : '',
+    p.donts?.length ? `- Don't: ${list(p.donts.map((d) => d.rule))}` : '',
+  ].filter(Boolean);
+  return lines.join('\n');
+}
+
+function draftSystem(principles: Principle[], persona: VoicePersona | null): string {
   const principleBlock =
     principles.length > 0
       ? `\n\nEDITORIAL CONSTITUTION (ratified rules — follow them; they override style defaults):\n${principles
@@ -100,7 +123,7 @@ Hard rules:
 - Every claim in the draft must be grounded in the provided source segments. Report each claim-bearing span with its source segment IDs.
 - Never invent facts, numbers, customers, or quotes. If the sources don't support a claim, leave it out.
 - Do not attribute a spoken opinion to a document or a web page, or vice versa.
-- No engagement-bait, no hashtag spam, no "I'm humbled to announce".${principleBlock}`;
+- No engagement-bait, no hashtag spam, no "I'm humbled to announce".${personaBlock(persona)}${principleBlock}`;
 }
 
 export async function proposeStubs(workspaceId: string, momentId: string): Promise<WeaveStub[]> {
@@ -241,10 +264,12 @@ export async function weaveDraft(
         .filter((p) => !(p.clusterId && suspended.has(p.clusterId)))
         .slice(0, config.maxInContextPrinciples)
     : [];
+  // Voice layer: the brand persona distilled from published output (independent of the constitution).
+  const persona = getActiveVoicePersona(workspaceId);
 
   const result = await structured({
     stage: 'weave-draft',
-    system: draftSystem(active),
+    system: draftSystem(active, persona),
     user:
       `Write this asset: ${FORMAT_SPECS[format]}\nAngle: ${angle}\nCentral moment (the piece's thesis): ${moment.claim}` +
       templateBlock(template) +
@@ -261,7 +286,7 @@ export async function weaveDraft(
   if (active.length > 0) {
     const out = await generate({
       stage: 'weave-revise',
-      system: draftSystem(active),
+      system: draftSystem(active, persona),
       user:
         `Review this draft against the editorial constitution above. If it complies, return it UNCHANGED. ` +
         `If any principle is violated, return a minimally revised version that complies. Return ONLY the draft text.\n\n${content}`,

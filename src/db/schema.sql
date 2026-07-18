@@ -17,8 +17,22 @@ CREATE TABLE IF NOT EXISTS sources (
   recorded_at TEXT,
   consent_basis TEXT NOT NULL,
   admitted INTEGER NOT NULL DEFAULT 1,   -- ingest quarantine: 0 = pending review, excluded from extraction
+  is_voice INTEGER NOT NULL DEFAULT 0,   -- 1 = published brand output (the voice corpus the persona is distilled from)
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Distilled brand-voice persona (the "soul"): register, lexicon, rhetoric, beliefs, obsessions, and
+-- do/don'ts inferred from the workspace's VOICE corpus (published output). A versioned, inspectable,
+-- receipted artifact that conditions weaving (the voice layer), independent of the constitution.
+CREATE TABLE IF NOT EXISTS voice_personas (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  version INTEGER NOT NULL DEFAULT 1,
+  profile TEXT NOT NULL,                 -- JSON VoicePersonaProfile (each trait cites example utterance ids)
+  enabled INTEGER NOT NULL DEFAULT 1,    -- whether this persona conditions weaving
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_voice_personas_ws ON voice_personas(workspace_id, created_at);
 
 CREATE TABLE IF NOT EXISTS utterances (
   id TEXT PRIMARY KEY,

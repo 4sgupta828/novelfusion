@@ -21,8 +21,12 @@ import {
   updateMomentState,
   updatePrincipleStatus,
   admitSource,
+  setSourceVoice,
   deleteSource,
   listSources,
+  getActiveVoicePersona,
+  setVoicePersonaEnabled,
+  getUtterancesByIdsOrdered,
   saveDraftInfographic,
   listCollaborators,
   createCollaborator,
@@ -51,6 +55,7 @@ import { latestBlastRadius, runCounterfactual } from './pipeline/counterfactual.
 import { proposeStubs, weaveDraft } from './pipeline/weave.js';
 import { suggestTemplate } from './pipeline/template-advisor.js';
 import { suggestInfographic } from './pipeline/infographic.js';
+import { distillPersona } from './pipeline/persona.js';
 import { extractMoments } from './pipeline/moments.js';
 import { ingestUrl, ingestDocumentText, ingestUploadBuffer } from './pipeline/ingest.js';
 import { gateReport } from './report/gate.js';
@@ -401,6 +406,39 @@ app.post('/api/:ws/sources/:id/admit', wrap((req, res) => {
   const ws = param(req, 'ws');
   admitSource(ws, param(req, 'id'));
   kickBackfill(ws); // admitting makes its passages retrieval-eligible — embed/index them now, in the background
+  res.json({ ok: true });
+}));
+
+// Tag/untag a source as the company's published VOICE (the corpus the persona is distilled from).
+app.post('/api/:ws/sources/:id/voice', wrap((req, res) => {
+  setSourceVoice(param(req, 'ws'), param(req, 'id'), req.body?.voice === true);
+  res.json({ ok: true });
+}));
+
+// ---------- voice persona ----------
+
+// Distill (+persist) the brand persona from the workspace's voice corpus.
+app.post('/api/:ws/persona/distill', wrap(async (req, res) => {
+  res.json(await distillPersona(param(req, 'ws')));
+}));
+
+// The active persona, with example passages hydrated for receipts.
+app.get('/api/:ws/persona', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const persona = getActiveVoicePersona(ws);
+  if (!persona) return void res.json({ persona: null, examples: [] });
+  const p = persona.profile;
+  const ids = [...new Set([
+    ...p.beliefs.flatMap((b) => b.exampleUtteranceIds),
+    ...p.dos.flatMap((d) => d.exampleUtteranceIds),
+    ...p.donts.flatMap((d) => d.exampleUtteranceIds),
+  ])];
+  res.json({ persona, examples: getUtterancesByIdsOrdered(ws, ids) });
+}));
+
+// Toggle whether the persona conditions weaving (the voice layer on/off).
+app.post('/api/:ws/persona/enabled', wrap((req, res) => {
+  setVoicePersonaEnabled(param(req, 'ws'), req.body?.enabled === true);
   res.json({ ok: true });
 }));
 

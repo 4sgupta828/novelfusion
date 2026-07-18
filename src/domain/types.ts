@@ -187,6 +187,28 @@ export interface Collaborator {
   createdAt: string;
 }
 
+/** The distilled brand voice — style plus soul — inferred from the workspace's published output.
+ *  Each judgemental trait carries example utterance ids (receipts) it was inferred from. */
+export interface VoicePersonaProfile {
+  summary: string; // one-line "who this brand sounds like"
+  register: string; // tone & cadence
+  rhetoric: string; // how it builds an argument
+  lexicon: { embraces: string[]; avoids: string[]; signaturePhrases: string[] };
+  beliefs: { statement: string; exampleUtteranceIds: string[] }[]; // POV / worldview — the soul
+  obsessions: string[]; // recurring themes
+  dos: { rule: string; exampleUtteranceIds: string[] }[];
+  donts: { rule: string; exampleUtteranceIds: string[] }[];
+}
+
+export interface VoicePersona {
+  id: string;
+  workspaceId: string;
+  version: number;
+  profile: VoicePersonaProfile;
+  enabled: boolean;
+  createdAt: string;
+}
+
 export interface EditEvent {
   id: string;
   workspaceId: string;

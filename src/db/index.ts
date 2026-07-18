@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import type {
   Cluster,
   Collaborator,
+  VoicePersona,
   CounterfactualResult,
   Draft,
   EditEvent,
@@ -51,7 +52,7 @@ function migrate(d: Database.Database): void {
     ['locator', `TEXT NOT NULL DEFAULT '{"kind":"transcript"}'`],
     ['provenance_class', "TEXT NOT NULL DEFAULT 'human_utterance'"],
   ]);
-  addCols('sources', [['admitted', 'INTEGER NOT NULL DEFAULT 1']]);
+  addCols('sources', [['admitted', 'INTEGER NOT NULL DEFAULT 1'], ['is_voice', 'INTEGER NOT NULL DEFAULT 0']]);
   addCols('principles', [['cluster_id', 'TEXT']]);
   addCols('edit_events', [['author_id', 'TEXT']]);
 
@@ -111,6 +112,60 @@ export function admitSource(workspaceId: string, sourceId: string): void {
   getDb().prepare('UPDATE sources SET admitted = 1 WHERE workspace_id = ? AND id = ?').run(workspaceId, sourceId);
 }
 
+/** Tag/untag a source as part of the VOICE corpus (published brand output the persona learns from). */
+export function setSourceVoice(workspaceId: string, sourceId: string, isVoice: boolean): void {
+  getDb().prepare('UPDATE sources SET is_voice = ? WHERE workspace_id = ? AND id = ?').run(isVoice ? 1 : 0, workspaceId, sourceId);
+}
+
+/** Admitted passages from voice-tagged sources — the corpus the persona is distilled from. */
+export function listVoiceUtterances(workspaceId: string): (Utterance & { workspaceId: string })[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT u.*, s.title AS source_title FROM utterances u
+       JOIN sources s ON s.id = u.source_id
+       WHERE u.workspace_id = ? AND s.admitted = 1 AND s.is_voice = 1 ORDER BY u.source_id, u.seq`,
+    )
+    .all(workspaceId) as Record<string, unknown>[];
+  return rows.map(rowToUtterance);
+}
+
+// ---------- voice persona ----------
+
+function rowToVoicePersona(r: Record<string, unknown>): VoicePersona {
+  return {
+    id: r.id as string,
+    workspaceId: r.workspace_id as string,
+    version: r.version as number,
+    profile: JSON.parse(r.profile as string),
+    enabled: (r.enabled as number) === 1,
+    createdAt: r.created_at as string,
+  };
+}
+
+/** The latest persona for a workspace (the active one), or null. */
+export function getActiveVoicePersona(workspaceId: string): VoicePersona | null {
+  const r = getDb()
+    .prepare('SELECT * FROM voice_personas WHERE workspace_id = ? ORDER BY version DESC, created_at DESC LIMIT 1')
+    .get(workspaceId) as Record<string, unknown> | undefined;
+  return r ? rowToVoicePersona(r) : null;
+}
+
+/** Save a freshly-distilled persona as a new version (becomes the active one). */
+export function saveVoicePersona(workspaceId: string, profile: unknown): VoicePersona {
+  const prev = getActiveVoicePersona(workspaceId);
+  const id = newId('voice');
+  getDb()
+    .prepare('INSERT INTO voice_personas (id, workspace_id, version, profile, enabled) VALUES (?, ?, ?, ?, 1)')
+    .run(id, workspaceId, (prev?.version ?? 0) + 1, JSON.stringify(profile));
+  return getActiveVoicePersona(workspaceId)!;
+}
+
+/** Toggle whether the active persona conditions weaving (the voice layer's on/off switch). */
+export function setVoicePersonaEnabled(workspaceId: string, enabled: boolean): void {
+  const p = getActiveVoicePersona(workspaceId);
+  if (p) getDb().prepare('UPDATE voice_personas SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, p.id);
+}
+
 /** Remove a source and everything derived from it, workspace-scoped: its passages, their
  *  embeddings + FTS rows, the retained blob, and any SLATED moments that cited a deleted
  *  passage (a slated moment pointing at deleted content is stale). Woven/rejected moments and
@@ -149,6 +204,7 @@ export interface SourceSummary {
   uri: string;
   consentBasis: string;
   admitted: boolean;
+  isVoice: boolean;
   segmentCount: number;
   createdAt: string;
 }
@@ -156,7 +212,7 @@ export interface SourceSummary {
 export function listSources(workspaceId: string): SourceSummary[] {
   const rows = getDb()
     .prepare(
-      `SELECT s.id, s.kind, s.title, s.uri, s.consent_basis, s.admitted, s.created_at,
+      `SELECT s.id, s.kind, s.title, s.uri, s.consent_basis, s.admitted, s.is_voice, s.created_at,
               (SELECT COUNT(*) FROM utterances u WHERE u.source_id = s.id) AS seg_count
        FROM sources s WHERE s.workspace_id = ? ORDER BY s.created_at DESC`,
     )
@@ -168,6 +224,7 @@ export function listSources(workspaceId: string): SourceSummary[] {
     uri: r.uri as string,
     consentBasis: r.consent_basis as string,
     admitted: (r.admitted as number) === 1,
+    isVoice: (r.is_voice as number) === 1,
     segmentCount: r.seg_count as number,
     createdAt: r.created_at as string,
   }));
