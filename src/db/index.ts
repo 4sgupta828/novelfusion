@@ -460,6 +460,30 @@ export function listMoments(workspaceId: string, state?: string, limit = 50): Mo
   return rows.map(rowToMoment);
 }
 
+/** The Slate: the day's publishing queue. Auto-mined moments are ranked by novelty×credibility and
+ *  capped at `top` (the attention budget). A PROMOTED moment (a human explicitly chose an idea →
+ *  moment) is a deliberate decision, not an algorithmic guess — so it is PINNED above the ranked
+ *  set and never hidden by the score cutoff (a promoted moment carries a neutral credibility prior,
+ *  so it would otherwise sink below the fold). Promoted-first, newest-first; each carries a
+ *  `promoted` flag for the UI. Promoted items drain from the slate as they're woven or rejected. */
+export function listSlate(workspaceId: string, top = 5): (Moment & { promoted: boolean })[] {
+  const promotedRows = getDb()
+    .prepare(
+      `SELECT m.* FROM moments m
+       WHERE m.workspace_id = ? AND m.state = 'slated'
+         AND m.id IN (SELECT promoted_moment_id FROM ideas WHERE workspace_id = ? AND promoted_moment_id IS NOT NULL)
+       ORDER BY m.created_at DESC`,
+    )
+    .all(workspaceId, workspaceId) as Record<string, unknown>[];
+  const promotedIds = new Set(promotedRows.map((r) => r.id as string));
+  const ranked = (
+    getDb().prepare(`SELECT * FROM moments WHERE workspace_id = ? AND state = 'slated' ORDER BY score DESC`).all(workspaceId) as Record<string, unknown>[]
+  )
+    .filter((r) => !promotedIds.has(r.id as string)) // never double-count a promoted moment
+    .slice(0, top);
+  return [...promotedRows, ...ranked].map((r) => ({ ...rowToMoment(r), promoted: promotedIds.has(r.id as string) }));
+}
+
 /** Canonical dedup keys for every existing moment in a workspace (any state, so a rejected
  *  moment is never resurrected by a re-extract). Key = sorted utterance-id set — a STRUCTURAL
  *  identity (code owns structure, Rule 18), not a claim-text match. */

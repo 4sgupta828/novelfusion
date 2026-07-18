@@ -128,3 +128,35 @@ describe('promoteIdeaToMoment (the only path into the governed pipeline)', () =>
     expect(db.getIdea('w', target.id)).toBeNull();
   });
 });
+
+describe('listSlate — promoted moments pin above the ranked cutoff (never lost)', () => {
+  it('surfaces a low-scored promoted moment ABOVE the top-N auto-mined moments', () => {
+    db.ensureWorkspace('slate');
+    db.insertSource({ id: 'ss', workspaceId: 'slate', kind: 'upload', uri: 'u', title: 'S', recordedAt: null, consentBasis: 'recorded_consent', admitted: true });
+    db.insertUtterances([utt('slate', 'ss', 'z1', 'a grounded utterance for the promoted idea', 0)]);
+    // Fill the slate with high-scored auto-mined moments (more than the top-N budget).
+    for (let i = 0; i < 6; i++) {
+      db.insertMoment({
+        id: `hi_${i}`, workspaceId: 'slate', utteranceIds: ['z1'], claim: `high ${i}`,
+        judgment: { novelty: 0.95, credibility: 0.95, riskFlags: [], whyNow: '' }, score: 0.95, state: 'slated', rejectionChip: null,
+      });
+    }
+    // A promoted idea → a LOW-scored moment (neutral credibility prior) that would sink below top-5.
+    const idea = db.insertIdea({
+      workspaceId: 'slate', text: 'a promoted low-novelty idea', rationale: 'r', novelty: 0.2,
+      sourceUtteranceIds: ['z1'], origin: 'brainstorm', clusterTitle: null, clusterThesis: null, authorId: null,
+    });
+    const promoted = ideas.promoteIdeaToMoment('slate', idea.id);
+    expect(promoted.score).toBeLessThan(0.5); // would never make the top-5 on merit
+
+    const slate = db.listSlate('slate', 5);
+    // pinned FIRST despite the lowest score, and flagged
+    expect(slate[0]!.id).toBe(promoted.id);
+    expect(slate[0]!.promoted).toBe(true);
+    // the ranked auto-mined moments still appear (top 5), none flagged promoted
+    expect(slate.filter((m) => !m.promoted)).toHaveLength(5);
+    expect(slate.filter((m) => !m.promoted).every((m) => m.score === 0.95)).toBe(true);
+    // a promoted moment is never double-counted
+    expect(slate.filter((m) => m.id === promoted.id)).toHaveLength(1);
+  });
+});

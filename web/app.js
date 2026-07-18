@@ -599,6 +599,7 @@ const HELP = {
     title: 'How the Slate works',
     body: `<p><strong>The Slate is your daily publishing queue.</strong> The system mines your admitted corpus for <em>moments</em> — specific, publishable insights someone actually said or wrote — ranks them by novelty × credibility, and shows the top few. Everything here is grounded: each card carries the receipt chips it came from.</p>
       <p><strong>Per card, do one thing:</strong> <em>Weave</em> it into a draft (choose a format + template), or <em>Reject</em> it with a reason. Rejections are the most valuable signal in the system — the distiller learns your taste from what you kill, so reject deliberately, not by ignoring.</p>
+      <p><strong>Promoted ideas pin to the top.</strong> Anything you promote from the <em>Ideas</em> board is your explicit choice, so it's pinned above the auto-mined moments (marked <em>✦ promoted from Ideas</em>) and never hidden by the ranking cutoff — it stays until you weave or reject it.</p>
       <p><strong>Use it well:</strong> work top-down, clear the slate daily (the attention-budget bar is the promise that it fits). Added new corpus docs? Hit <em>↻ Re-extract</em> to mine them — already-seen moments are skipped. If the slate feels off-target, that's a constitution problem, not a slate problem — reject a few with reasons and distill.</p>`,
   },
   constitution: {
@@ -659,7 +660,8 @@ async function renderSlate(view, stale) {
     moments
     .map(
       (m, i) => `
-    <article class="card ${i === state.sel ? 'selected' : ''}" data-idx="${i}" data-id="${esc(m.id)}" aria-current="${i === state.sel}">
+    <article class="card ${i === state.sel ? 'selected' : ''}${m.promoted ? ' card-promoted' : ''}" data-idx="${i}" data-id="${esc(m.id)}" aria-current="${i === state.sel}">
+      ${m.promoted ? '<span class="promoted-tag" title="You promoted this from the Ideas board">✦ promoted from Ideas</span>' : ''}
       <p class="claim">${esc(m.claim)}</p>
       <p class="whynow">${esc(m.judgment.whyNow)}</p>
       <div class="meta-row">
@@ -1326,7 +1328,7 @@ async function renderIdeas(view, stale) {
     $('.idea-promote', card)?.addEventListener('click', (e) =>
       busy(e.target, async () => {
         await api(`${state.ws}/ideas/${idea.id}/promote`, { method: 'POST' });
-        toast('Promoted to the Slate as a moment.');
+        toast('Promoted — pinned to the top of the Slate.');
         render();
       }),
     );

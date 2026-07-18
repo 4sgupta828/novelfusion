@@ -16,7 +16,7 @@ import {
   getDb,
   listDrafts,
   listEdits,
-  listMoments,
+  listSlate,
   listPrinciples,
   updateMomentState,
   updatePrincipleStatus,
@@ -232,7 +232,7 @@ app.delete('/api/:ws/ideas/:id', wrap((req, res) => {
 app.get('/api/:ws/slate', wrap((req, res) => {
   const ws = param(req, 'ws');
   const top = Number.isFinite(Number(req.query.top)) ? Number(req.query.top) : 5;
-  const moments = listMoments(ws, 'slated', top).map((m) => ({
+  const moments = listSlate(ws, top).map((m) => ({
     ...m,
     utterances: getUtterancesByIds(ws, m.utteranceIds),
   }));

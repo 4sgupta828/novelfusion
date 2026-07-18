@@ -789,3 +789,12 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 .idea-nogrounds { font-size: 12px; color: var(--amber); font-style: italic; margin: 0 0 10px; }
 .idea-actions { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px; }
 .idea-actions .idea-dismiss { margin-left: auto; }
+
+/* promoted-from-idea moments pin to the top of the Slate — mark them so the human choice reads as deliberate */
+.card-promoted { border-color: var(--violet); box-shadow: inset 3px 0 0 var(--violet), var(--shadow); }
+.card-promoted.selected { border-color: var(--pencil); box-shadow: inset 3px 0 0 var(--pencil), var(--shadow); }
+.promoted-tag {
+  display: inline-block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.03em;
+  color: var(--violet); background: var(--violet-soft); border-radius: 999px;
+  padding: 2px 9px; margin: 0 0 10px; text-transform: uppercase;
+}
