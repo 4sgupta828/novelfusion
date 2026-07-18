@@ -33,6 +33,42 @@ async function api(path, opts = {}) {
   return data;
 }
 
+/* ---------- shareable draft deep-links (hash routing) ---------- */
+
+const draftHash = (ws, id) => `#/ws/${encodeURIComponent(ws)}/draft/${encodeURIComponent(id)}`;
+const draftUrl = (ws, id) => `${location.origin}${location.pathname}${draftHash(ws, id)}`;
+
+function parseDraftHash() {
+  const m = location.hash.match(/^#\/ws\/([^/]+)\/draft\/([^/]+)$/);
+  return m ? { ws: decodeURIComponent(m[1]), draftId: decodeURIComponent(m[2]) } : null;
+}
+
+/** If the URL points at a draft, open it (switching workspace if needed). Returns true if handled. */
+function applyDraftHash() {
+  const p = parseDraftHash();
+  if (!p) return false;
+  const sel = $('#ws-select');
+  if (p.ws && p.ws !== state.ws && sel && [...sel.options].some((o) => o.value === p.ws)) {
+    state.ws = p.ws;
+    localStorage.setItem('nf.ws', state.ws);
+    sel.value = state.ws;
+  }
+  state.view = 'drafts';
+  state.detail = { kind: 'draft', id: p.draftId };
+  state.animate = true;
+  render();
+  return true;
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 let toastTimer;
 function toast(msg, isError = false) {
   const el = $('#toast');
@@ -249,7 +285,16 @@ function figureHtml(v, utterances) {
 function structuredDraftHtml(d) {
   const vizFor = (key) => d.viz.filter((v) => v.afterSection === key).map((v) => figureHtml(v, d.utterances)).join('');
   const placed = new Set(d.viz.filter((v) => v.afterSection).map((v) => v.afterSection));
+  // A freeform draft (no template sections) still carries its full prose in `content` — render it,
+  // then the figures. Without this, a freeform draft that happens to have a chart shows ONLY the
+  // chart and hides the whole post.
+  const prose = d.sections.length === 0 && (d.content || '').trim()
+    ? `<div class="draft-prose">${esc(d.content)}</div>`
+    : '';
+  // Skip empty sections — the model folds weak sections into fewer for short formats, and a bare
+  // heading with no body reads as a broken/terse draft.
   const sections = d.sections
+    .filter((s) => (s.body || '').trim().length > 0)
     .map(
       (s) => `<section class="draft-section">
         <h3 class="draft-section-title">${esc(s.title)}</h3>
@@ -259,7 +304,7 @@ function structuredDraftHtml(d) {
     )
     .join('');
   const trailing = d.viz.filter((v) => !v.afterSection || !placed.has(v.afterSection)).map((v) => figureHtml(v, d.utterances)).join('');
-  return `<div class="draft-structured">${sections}${trailing}</div>`;
+  return `<div class="draft-structured">${prose}${sections}${trailing}</div>`;
 }
 
 /* ---------- views ---------- */
@@ -533,6 +578,8 @@ async function renderDraftDetail(view, id, stale) {
     <div class="draft-content" id="draft-content">${(d.sections && d.sections.length) || (d.viz && d.viz.length) ? structuredDraftHtml(d) : esc(d.content)}</div>
     <div class="card-actions" style="margin-top:14px">
       <button class="primary" id="edit-btn">Edit this draft</button>
+      <button class="secondary" id="copy-text-btn" title="Copy the draft text to paste elsewhere">⧉ Copy text</button>
+      <button class="secondary" id="copy-link-btn" title="Copy a link that opens this draft">⧉ Copy link</button>
     </div>
     <div id="editor-zone" hidden>
       <div class="section-label">Your edit becomes policy</div>
@@ -555,8 +602,18 @@ async function renderDraftDetail(view, id, stale) {
     </div>
     ${d.edits.length > 0 ? `<div class="section-label">Edit history</div>${d.edits.map((e) => `<div class="diff-title">${esc(e.id)} · ${esc(e.reasonChip ?? 'unspecified')}</div>${diffHtml(e.diff)}`).join('')}` : ''}
   `;
+  // Reflect the open draft in the URL (no reload) so "Copy link" and browser back work.
+  history.replaceState(null, '', draftHash(state.ws, id));
   wireChips(view, d.utterances);
-  $('#back', view).addEventListener('click', () => { state.detail = null; render(); });
+  $('#back', view).addEventListener('click', () => { state.detail = null; history.replaceState(null, '', location.pathname + location.search); render(); });
+  $('#copy-text-btn', view).addEventListener('click', async (e) => {
+    const ok = await copyToClipboard(d.content || '');
+    toast(ok ? 'Draft text copied to clipboard.' : 'Copy failed — select and copy manually.', !ok);
+  });
+  $('#copy-link-btn', view).addEventListener('click', async (e) => {
+    const ok = await copyToClipboard(draftUrl(state.ws, id));
+    toast(ok ? 'Shareable link copied — opens this draft in the workbench.' : 'Copy failed.', !ok);
+  });
   $('#edit-btn', view).addEventListener('click', () => { $('#editor-zone', view).hidden = false; $('#edit-btn', view).hidden = true; $('#editor', view).focus(); });
   $('#cancel-edit', view).addEventListener('click', () => { $('#editor-zone', view).hidden = true; $('#edit-btn', view).hidden = false; });
   $('#save-edit', view).addEventListener('click', (ev) =>
@@ -1374,5 +1431,11 @@ $('#weave-go').addEventListener('click', (e) => {
     return;
   }
   await refreshWorkspaces();
-  render();
+  // Open a draft directly if the URL is a shared draft link; otherwise the default view.
+  if (!applyDraftHash()) render();
 })();
+
+// Pasted link / browser back-forward into a draft link.
+window.addEventListener('hashchange', () => {
+  if (parseDraftHash()) applyDraftHash();
+});

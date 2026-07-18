@@ -395,6 +395,8 @@ dialog h2 { font-family: var(--serif); margin: 0 0 12px; font-size: 18px; }
   letter-spacing: 0.1em; color: var(--pencil); margin: 0 0 8px;
 }
 .draft-section-body { font-family: var(--serif); font-size: 16px; line-height: 1.65; white-space: pre-wrap; max-width: 68ch; }
+/* freeform prose inside a structured render (a freeform draft that also carries a chart) */
+.draft-prose { font-family: var(--serif); font-size: 16px; line-height: 1.65; white-space: pre-wrap; max-width: 68ch; margin-bottom: 18px; }
 
 /* ---------- figures ---------- */
 .viz-root, .figure {
