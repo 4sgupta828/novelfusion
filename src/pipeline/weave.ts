@@ -321,6 +321,7 @@ export async function weaveDraft(
     content,
     sections,
     viz,
+    infographic: null,
     provenance,
     constitutionVersion: constitutionVersion(workspaceId),
     holdout: opts.holdout ?? Math.random() < config.holdoutFraction,

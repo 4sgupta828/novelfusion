@@ -44,6 +44,7 @@ function migrate(d: Database.Database): void {
     ['template', "TEXT NOT NULL DEFAULT 'freeform'"],
     ['sections', "TEXT NOT NULL DEFAULT '[]'"],
     ['viz', "TEXT NOT NULL DEFAULT '[]'"],
+    ['infographic', 'TEXT'],
   ]);
   addCols('utterances', [
     ['locator', `TEXT NOT NULL DEFAULT '{"kind":"transcript"}'`],
@@ -451,6 +452,7 @@ function rowToDraft(r: Record<string, unknown>): Draft {
     content: r.content as string,
     sections: JSON.parse((r.sections as string) ?? '[]'),
     viz: JSON.parse((r.viz as string) ?? '[]'),
+    infographic: r.infographic ? JSON.parse(r.infographic as string) : null,
     provenance: JSON.parse(r.provenance as string),
     constitutionVersion: r.constitution_version as number,
     holdout: (r.holdout as number) === 1,
@@ -464,6 +466,13 @@ export function getDraft(workspaceId: string, id: string): Draft | null {
     | Record<string, unknown>
     | undefined;
   return r ? rowToDraft(r) : null;
+}
+
+/** Persist (or clear) the infographic poster attached to a draft — makes it part of the post. */
+export function saveDraftInfographic(workspaceId: string, id: string, poster: unknown | null): void {
+  getDb()
+    .prepare('UPDATE drafts SET infographic = ? WHERE workspace_id = ? AND id = ?')
+    .run(poster == null ? null : JSON.stringify(poster), workspaceId, id);
 }
 
 export function listDrafts(workspaceId: string, opts: { holdout?: boolean } = {}): Draft[] {

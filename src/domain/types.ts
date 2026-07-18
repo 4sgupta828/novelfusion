@@ -144,6 +144,18 @@ export interface VizSpec {
   utteranceIds: string[];
 }
 
+/** A shareable infographic poster composed from a draft's own grounded content. Persisted on the
+ *  draft (part of the post), rendered inline and exportable to PNG. */
+export interface InfographicPoster {
+  eyebrow: string;
+  headline: string;
+  subhead: string;
+  stats: { value: string; label: string }[];
+  takeaway: string;
+  featureViz: VizSpec | null;
+  source: string;
+}
+
 export interface Draft {
   id: string;
   workspaceId: string;
@@ -157,6 +169,8 @@ export interface Draft {
   sections: DraftSection[];
   /** Charts/tables the model emitted (empty when none warranted). */
   viz: VizSpec[];
+  /** A persisted infographic poster built from this draft (null until generated). */
+  infographic: InfographicPoster | null;
   provenance: ProvenanceEntry[];
   constitutionVersion: number;
   /** true → excluded from exemplar retrieval and distillation (Rule 5: eval holdout). */

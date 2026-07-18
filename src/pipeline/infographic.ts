@@ -6,8 +6,8 @@
 
 import { z } from 'zod/v4';
 import { structured } from '../llm/client.js';
-import { getDraft, getUtterancesByIds } from '../db/index.js';
-import type { VizSpec } from '../domain/types.js';
+import { getDraft, getUtterancesByIds, saveDraftInfographic } from '../db/index.js';
+import type { VizSpec, InfographicPoster } from '../domain/types.js';
 
 const SpecSchema = z.object({
   eyebrow: z.string().describe('a 1–3 word category label, ALL CAPS feel, e.g. "AI GTM"'),
@@ -20,15 +20,6 @@ const SpecSchema = z.object({
   featureVizIndex: z.number().nullable().describe('index into the draft figures to feature in the poster, or null'),
 });
 
-export interface InfographicResult {
-  eyebrow: string;
-  headline: string;
-  subhead: string;
-  stats: { value: string; label: string }[];
-  takeaway: string;
-  featureViz: VizSpec | null;
-  source: string;
-}
 
 const NUM_RE = /\d[\d,]*(?:\.\d+)?/g;
 const core = (s: string) => s.replace(/[,\s]/g, '');
@@ -58,7 +49,8 @@ function sourceLabel(workspaceId: string, provenance: { utteranceIds: string[] }
   return top ? top[0] : 'grounded in the workspace corpus';
 }
 
-export async function suggestInfographic(workspaceId: string, draftId: string): Promise<InfographicResult> {
+/** Compose an infographic poster from a draft AND persist it onto the draft (part of the post). */
+export async function suggestInfographic(workspaceId: string, draftId: string): Promise<InfographicPoster> {
   const draft = getDraft(workspaceId, draftId);
   if (!draft) throw new Error(`Draft ${draftId} not found.`);
 
@@ -93,7 +85,7 @@ export async function suggestInfographic(workspaceId: string, draftId: string): 
   const idx = spec.featureVizIndex;
   const featureViz = idx != null && idx >= 0 && idx < draft.viz.length ? draft.viz[idx]! : draft.viz[0] ?? null;
 
-  return {
+  const poster: InfographicPoster = {
     eyebrow: spec.eyebrow.trim(),
     headline: spec.headline.trim(),
     subhead: spec.subhead.trim(),
@@ -102,4 +94,6 @@ export async function suggestInfographic(workspaceId: string, draftId: string): 
     featureViz,
     source: sourceLabel(workspaceId, draft.provenance),
   };
+  saveDraftInfographic(workspaceId, draftId, poster); // built into the post — persisted + rendered inline
+  return poster;
 }

@@ -23,6 +23,7 @@ import {
   admitSource,
   deleteSource,
   listSources,
+  saveDraftInfographic,
   listUtterances,
   insertSourceBlob,
   getSourceBlob,
@@ -256,9 +257,15 @@ app.post('/api/:ws/drafts/:id/edit', wrap((req, res) => {
   res.json(e);
 }));
 
-// Compose a shareable infographic spec from a draft (grounded in the draft's own content).
+// Compose + persist a shareable infographic on a draft (grounded in the draft's own content).
 app.post('/api/:ws/drafts/:id/infographic', wrap(async (req, res) => {
   res.json(await suggestInfographic(param(req, 'ws'), param(req, 'id')));
+}));
+
+// Remove the infographic from a draft.
+app.delete('/api/:ws/drafts/:id/infographic', wrap((req, res) => {
+  saveDraftInfographic(param(req, 'ws'), param(req, 'id'), null);
+  res.json({ ok: true });
 }));
 
 app.post('/api/:ws/principles/:id/accept', wrap((req, res) => {

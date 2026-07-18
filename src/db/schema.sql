@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS drafts (
   content TEXT NOT NULL,
   sections TEXT NOT NULL DEFAULT '[]',   -- JSON DraftSection[]
   viz TEXT NOT NULL DEFAULT '[]',        -- JSON VizSpec[]
+  infographic TEXT,                      -- JSON InfographicPoster | null (persisted, part of the post)
   provenance TEXT NOT NULL,             -- JSON ProvenanceEntry[]
   constitution_version INTEGER NOT NULL DEFAULT 0,
   holdout INTEGER NOT NULL DEFAULT 0,   -- Rule 5: holdouts excluded from exemplars/distillation

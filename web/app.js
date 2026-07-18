@@ -520,11 +520,16 @@ function svgToPng(svgString, filename, scale = 2) {
   img.src = url;
 }
 
-function openInfographic(info) {
-  const dlg = $('#info-dialog');
-  $('#info-preview', dlg).innerHTML = infographicSvg(info); // rebuilt on download to pick up theme
-  $('#info-download', dlg).onclick = () => svgToPng(infographicSvg(info), 'novelfusion-infographic.png');
-  dlg.showModal();
+/** The infographic as an inline part of the post: the poster + a small toolbar. */
+function infographicBlock(poster) {
+  return `<figure class="draft-infographic">
+    <figcaption class="draft-ig-label">Infographic — shareable, grounded in this post</figcaption>
+    <div class="draft-ig-poster">${infographicSvg(poster)}</div>
+    <div class="draft-ig-actions">
+      <button class="secondary" id="ig-download">↓ Download PNG</button>
+      <button class="danger-link" id="ig-remove">Remove</button>
+    </div>
+  </figure>`;
 }
 
 /** Render a templated draft: intent-framed sections interleaved with their figures. */
@@ -852,10 +857,11 @@ async function renderDraftDetail(view, id, stale) {
       ${d.template && d.template !== 'freeform' ? `<span class="pill neutral">${esc(TEMPLATE_LABEL[d.template] ?? d.template)}</span>` : ''}
       ${d.holdout ? '<span class="pill shadow" title="Reserved for evaluation — never used as training signal">holdout</span>' : ''}
     </div>
+    ${d.infographic ? infographicBlock(d.infographic) : ''}
     <div class="draft-content" id="draft-content">${(d.sections && d.sections.length) || (d.viz && d.viz.length) ? structuredDraftHtml(d) : esc(d.content)}</div>
     <div class="card-actions" style="margin-top:14px">
       <button class="primary" id="edit-btn">Edit this draft</button>
-      <button class="secondary" id="infographic-btn" title="Generate a shareable infographic from this draft">◨ Infographic</button>
+      <button class="secondary" id="infographic-btn" title="${d.infographic ? 'Rebuild the infographic from this draft' : 'Build a shareable infographic into this post'}">◨ ${d.infographic ? 'Regenerate infographic' : 'Add infographic'}</button>
       <button class="secondary" id="copy-text-btn" title="Copy the draft text to paste elsewhere">⧉ Copy text</button>
       <button class="secondary" id="copy-link-btn" title="Copy a link that opens this draft">⧉ Copy link</button>
     </div>
@@ -894,10 +900,18 @@ async function renderDraftDetail(view, id, stale) {
   });
   $('#infographic-btn', view).addEventListener('click', (e) =>
     busy(e.target.closest('button'), async () => {
-      const info = await api(`${state.ws}/drafts/${id}/infographic`, { method: 'POST' });
-      openInfographic(info);
+      await api(`${state.ws}/drafts/${id}/infographic`, { method: 'POST' }); // generates + persists onto the draft
+      toast('Infographic built into the post.');
+      render(); // re-render the draft — the poster now shows inline
     }),
   );
+  // Inline poster toolbar (present only once an infographic exists on the draft).
+  $('#ig-download', view)?.addEventListener('click', () => svgToPng(infographicSvg(d.infographic), 'novelfusion-infographic.png'));
+  $('#ig-remove', view)?.addEventListener('click', async () => {
+    if (!confirm('Remove the infographic from this post?')) return;
+    try { await api(`${state.ws}/drafts/${id}/infographic`, { method: 'DELETE' }); toast('Infographic removed.'); render(); }
+    catch (err) { toast(err.message, true); }
+  });
   $('#edit-btn', view).addEventListener('click', () => { $('#editor-zone', view).hidden = false; $('#edit-btn', view).hidden = true; $('#editor', view).focus(); });
   $('#cancel-edit', view).addEventListener('click', () => { $('#editor-zone', view).hidden = true; $('#edit-btn', view).hidden = false; });
   $('#save-edit', view).addEventListener('click', (ev) =>
@@ -1692,7 +1706,6 @@ $('#ws-new').addEventListener('click', async () => {
 
 // Weave dialog wiring
 $('#weave-cancel').addEventListener('click', () => $('#weave-dialog').close());
-$('#info-close').addEventListener('click', () => $('#info-dialog').close());
 $('#weave-go').addEventListener('click', (e) => {
   const dlg = $('#weave-dialog');
   const format = dlg.querySelector('input[name="wformat"]:checked')?.value || 'li_post';

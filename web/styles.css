@@ -675,10 +675,15 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 .corpus-discover .corpus-form-hint { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
 .corpus-discover .corpus-form-hint strong { color: var(--amber); }
 
-/* ---------- infographic dialog ---------- */
-#info-dialog { max-width: 560px; }
-.info-preview {
-  border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin: 4px 0 4px;
-  background: var(--surface); max-height: 62vh; display: flex; justify-content: center;
+/* ---------- infographic (inline, part of the post) ---------- */
+.draft-infographic { margin: 0 0 22px; }
+.draft-ig-label {
+  font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); margin-bottom: 8px;
 }
-.info-preview svg { width: 100%; height: auto; max-height: 62vh; display: block; }
+.draft-ig-poster {
+  border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+  background: var(--surface); max-width: 440px; box-shadow: var(--shadow);
+}
+.draft-ig-poster svg { width: 100%; height: auto; display: block; }
+.draft-ig-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
