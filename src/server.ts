@@ -45,6 +45,7 @@ import { distill } from './pipeline/distill.js';
 import { latestBlastRadius, runCounterfactual } from './pipeline/counterfactual.js';
 import { proposeStubs, weaveDraft } from './pipeline/weave.js';
 import { suggestTemplate } from './pipeline/template-advisor.js';
+import { suggestInfographic } from './pipeline/infographic.js';
 import { extractMoments } from './pipeline/moments.js';
 import { ingestUrl, ingestDocumentText, ingestUploadBuffer } from './pipeline/ingest.js';
 import { gateReport } from './report/gate.js';
@@ -253,6 +254,11 @@ app.post('/api/:ws/drafts/:id/edit', wrap((req, res) => {
   const chip = reason == null ? null : oneOf<EditReasonChip>(reason, EDIT_REASONS, 'edit reason');
   const e = captureEditContent(param(req, 'ws'), param(req, 'id'), content, chip);
   res.json(e);
+}));
+
+// Compose a shareable infographic spec from a draft (grounded in the draft's own content).
+app.post('/api/:ws/drafts/:id/infographic', wrap(async (req, res) => {
+  res.json(await suggestInfographic(param(req, 'ws'), param(req, 'id')));
 }));
 
 app.post('/api/:ws/principles/:id/accept', wrap((req, res) => {

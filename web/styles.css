@@ -674,3 +674,11 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 .corpus-discover input:focus { outline: none; border-color: var(--pencil); }
 .corpus-discover .corpus-form-hint { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
 .corpus-discover .corpus-form-hint strong { color: var(--amber); }
+
+/* ---------- infographic dialog ---------- */
+#info-dialog { max-width: 560px; }
+.info-preview {
+  border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; margin: 4px 0 4px;
+  background: var(--surface); max-height: 62vh; display: flex; justify-content: center;
+}
+.info-preview svg { width: 100%; height: auto; max-height: 62vh; display: block; }

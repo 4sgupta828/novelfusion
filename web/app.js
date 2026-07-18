@@ -406,6 +406,127 @@ function figureHtml(v, utterances) {
   </figure>`;
 }
 
+/* ---------- infographic poster (self-contained SVG → downloadable PNG) ---------- */
+
+const INFO_W = 1080, INFO_H = 1350;
+
+// Resolve the current theme's tokens to literal values so the poster SVG is self-contained
+// (renders identically in-page and when rasterized to PNG, with no external CSS).
+function resolveColors() {
+  const cs = getComputedStyle(document.documentElement);
+  const g = (v, fb) => (cs.getPropertyValue(v).trim() || fb);
+  return {
+    surface: g('--surface', '#ffffff'), paper: g('--paper', '#f4f5f2'),
+    ink: g('--ink', '#191c21'), muted: g('--muted', '#626977'),
+    pencil: g('--pencil', '#2f4bd7'), line: g('--line', '#e0e2dd'),
+    viz: [g('--viz-1', '#2a78d6'), g('--viz-2', '#008300'), g('--viz-3', '#e87ba4'), g('--viz-4', '#eda100')],
+    serif: g('--serif', 'Georgia, serif'), mono: g('--mono', 'monospace'), sans: g('--sans', 'system-ui, sans-serif'),
+  };
+}
+
+function wrapLines(text, maxChars) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = []; let cur = '';
+  for (const w of words) {
+    if ((cur + ' ' + w).trim().length > maxChars && cur) { lines.push(cur); cur = w; }
+    else cur = (cur ? cur + ' ' : '') + w;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+// A compact, pure-SVG (literal colors) chart for the poster: groups → grouped bars, series → bars.
+function posterChartSvg(v, c, x, y, w, h) {
+  if (!v) return '';
+  const fmt = (val, unit) => fmtVal(val, unit);
+  if (Array.isArray(v.groups) && v.groups.length) {
+    const groups = v.groups, names = [];
+    groups.forEach((g) => g.values.forEach((s) => { if (!names.includes(s.name)) names.push(s.name); }));
+    const max = Math.max(...groups.flatMap((g) => g.values.map((s) => s.value)), 1);
+    const bandW = w / groups.length, gpad = bandW * 0.2, innerW = bandW - gpad * 2, bw = innerW / names.length, plotH = h - 64;
+    let out = '';
+    groups.forEach((g, gi) => {
+      const bx = x + gi * bandW + gpad;
+      names.forEach((n, si) => {
+        const val = g.values.find((s) => s.name === n)?.value ?? 0, bh = (val / max) * plotH, rx = bx + si * bw;
+        out += `<rect x="${rx + 2}" y="${y + plotH - bh}" width="${Math.max(2, bw - 4)}" height="${bh}" rx="5" fill="${c.viz[si % 4]}"/>`;
+        out += `<text x="${rx + bw / 2}" y="${y + plotH - bh - 12}" text-anchor="middle" font-family="${c.mono}" font-size="22" font-weight="600" fill="${c.ink}">${esc(fmt(val, v.unit))}</text>`;
+      });
+      out += `<text x="${bx + innerW / 2}" y="${y + plotH + 30}" text-anchor="middle" font-family="${c.sans}" font-size="24" fill="${c.muted}">${esc(g.label)}</text>`;
+    });
+    let lx = x;
+    out += names.map((n, i) => { const seg = `<rect x="${lx}" y="${y + h - 2}" width="16" height="16" rx="4" fill="${c.viz[i % 4]}"/><text x="${lx + 22}" y="${y + h + 12}" font-family="${c.sans}" font-size="22" fill="${c.muted}">${esc(n)}</text>`; lx += 46 + n.length * 12; return seg; }).join('');
+    return out;
+  }
+  if (Array.isArray(v.series) && v.series.length) {
+    const s = v.series.slice(0, 5), max = Math.max(...s.map((d) => d.value), 1);
+    const rh = Math.min(60, (h - 10) / s.length - 16), gap = 16, barX = x + 240, barW = w - 240 - 130;
+    return s.map((d, i) => {
+      const yy = y + i * (rh + gap), fw = Math.max(4, (d.value / max) * barW);
+      return `<text x="${barX - 16}" y="${yy + rh / 2}" text-anchor="end" dominant-baseline="central" font-family="${c.sans}" font-size="26" fill="${c.ink}">${esc(d.label)}</text>`
+        + `<rect x="${barX}" y="${yy}" width="${barW}" height="${rh}" rx="8" fill="${c.paper}"/>`
+        + `<rect x="${barX}" y="${yy}" width="${fw}" height="${rh}" rx="8" fill="${c.viz[i % 4]}"/>`
+        + `<text x="${barX + fw + 14}" y="${yy + rh / 2}" dominant-baseline="central" font-family="${c.mono}" font-size="26" font-weight="600" fill="${c.ink}">${esc(fmt(d.value, v.unit))}</text>`;
+    }).join('');
+  }
+  return '';
+}
+
+function infographicSvg(info) {
+  const c = resolveColors(), M = 80;
+  let out = `<rect width="${INFO_W}" height="${INFO_H}" fill="${c.surface}"/><rect x="0" y="0" width="14" height="${INFO_H}" fill="${c.pencil}"/>`;
+  out += `<text x="${M}" y="118" font-family="${c.mono}" font-size="28" letter-spacing="3" font-weight="600" fill="${c.pencil}">${esc((info.eyebrow || '').toUpperCase())}</text>`;
+  out += `<text x="${INFO_W - M}" y="118" text-anchor="end" font-family="${c.serif}" font-size="30" fill="${c.muted}">✎ NovelFusion</text>`;
+  let y = 246;
+  wrapLines(info.headline, 18).slice(0, 3).forEach((l) => { out += `<text x="${M}" y="${y}" font-family="${c.serif}" font-size="78" font-weight="700" fill="${c.ink}">${esc(l)}</text>`; y += 92; });
+  y += 6;
+  wrapLines(info.subhead, 52).slice(0, 2).forEach((l) => { out += `<text x="${M}" y="${y}" font-family="${c.sans}" font-size="34" fill="${c.muted}">${esc(l)}</text>`; y += 44; });
+  const stats = (info.stats || []).slice(0, 3);
+  if (stats.length) {
+    y += 46; const colW = (INFO_W - 2 * M) / stats.length;
+    stats.forEach((s, i) => {
+      const cx = M + colW * i + colW / 2;
+      out += `<text x="${cx}" y="${y + 66}" text-anchor="middle" font-family="${c.serif}" font-size="84" font-weight="700" fill="${c.pencil}">${esc(s.value)}</text>`;
+      wrapLines(s.label, 22).slice(0, 2).forEach((l, li) => out += `<text x="${cx}" y="${y + 108 + li * 30}" text-anchor="middle" font-family="${c.sans}" font-size="26" fill="${c.muted}">${esc(l)}</text>`);
+    });
+    y += 200;
+  }
+  const chart = posterChartSvg(info.featureViz, c, M, y + (info.featureViz?.title ? 26 : 0), INFO_W - 2 * M, 300);
+  if (chart) {
+    if (info.featureViz?.title) out += `<text x="${M}" y="${y}" font-family="${c.sans}" font-size="24" font-weight="600" fill="${c.muted}">${esc(info.featureViz.title)}</text>`;
+    out += chart; y += (info.featureViz?.title ? 26 : 0) + 348;
+  }
+  const tk = wrapLines(info.takeaway, 42).slice(0, 3);
+  y = Math.max(y, INFO_H - 300);
+  out += `<rect x="${M}" y="${y - 38}" width="8" height="${20 + tk.length * 52}" rx="4" fill="${c.pencil}"/>`;
+  tk.forEach((l) => { out += `<text x="${M + 30}" y="${y}" font-family="${c.serif}" font-size="42" font-style="italic" fill="${c.ink}">${esc(l)}</text>`; y += 52; });
+  const src = (info.source || '').length > 52 ? (info.source || '').slice(0, 51).trimEnd() + '…' : (info.source || '');
+  out += `<line x1="${M}" y1="${INFO_H - 94}" x2="${INFO_W - M}" y2="${INFO_H - 94}" stroke="${c.line}" stroke-width="2"/>`;
+  out += `<text x="${M}" y="${INFO_H - 54}" font-family="${c.mono}" font-size="24" fill="${c.muted}">◦ grounded · ${esc(src)}</text>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${INFO_W} ${INFO_H}" width="${INFO_W}" height="${INFO_H}">${out}</svg>`;
+}
+
+function svgToPng(svgString, filename, scale = 2) {
+  const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => {
+    const cv = document.createElement('canvas'); cv.width = INFO_W * scale; cv.height = INFO_H * scale;
+    const ctx = cv.getContext('2d'); ctx.scale(scale, scale); ctx.drawImage(img, 0, 0, INFO_W, INFO_H);
+    URL.revokeObjectURL(url);
+    cv.toBlob((png) => { const a = document.createElement('a'); a.href = URL.createObjectURL(png); a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1500); }, 'image/png');
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast('Could not rasterize the poster.', true); };
+  img.src = url;
+}
+
+function openInfographic(info) {
+  const dlg = $('#info-dialog');
+  $('#info-preview', dlg).innerHTML = infographicSvg(info); // rebuilt on download to pick up theme
+  $('#info-download', dlg).onclick = () => svgToPng(infographicSvg(info), 'novelfusion-infographic.png');
+  dlg.showModal();
+}
+
 /** Render a templated draft: intent-framed sections interleaved with their figures. */
 function structuredDraftHtml(d) {
   const vizFor = (key) => d.viz.filter((v) => v.afterSection === key).map((v) => figureHtml(v, d.utterances)).join('');
@@ -734,6 +855,7 @@ async function renderDraftDetail(view, id, stale) {
     <div class="draft-content" id="draft-content">${(d.sections && d.sections.length) || (d.viz && d.viz.length) ? structuredDraftHtml(d) : esc(d.content)}</div>
     <div class="card-actions" style="margin-top:14px">
       <button class="primary" id="edit-btn">Edit this draft</button>
+      <button class="secondary" id="infographic-btn" title="Generate a shareable infographic from this draft">◨ Infographic</button>
       <button class="secondary" id="copy-text-btn" title="Copy the draft text to paste elsewhere">⧉ Copy text</button>
       <button class="secondary" id="copy-link-btn" title="Copy a link that opens this draft">⧉ Copy link</button>
     </div>
@@ -770,6 +892,12 @@ async function renderDraftDetail(view, id, stale) {
     const ok = await copyToClipboard(draftUrl(state.ws, id));
     toast(ok ? 'Shareable link copied — opens this draft in the workbench.' : 'Copy failed.', !ok);
   });
+  $('#infographic-btn', view).addEventListener('click', (e) =>
+    busy(e.target.closest('button'), async () => {
+      const info = await api(`${state.ws}/drafts/${id}/infographic`, { method: 'POST' });
+      openInfographic(info);
+    }),
+  );
   $('#edit-btn', view).addEventListener('click', () => { $('#editor-zone', view).hidden = false; $('#edit-btn', view).hidden = true; $('#editor', view).focus(); });
   $('#cancel-edit', view).addEventListener('click', () => { $('#editor-zone', view).hidden = true; $('#edit-btn', view).hidden = false; });
   $('#save-edit', view).addEventListener('click', (ev) =>
@@ -1564,6 +1692,7 @@ $('#ws-new').addEventListener('click', async () => {
 
 // Weave dialog wiring
 $('#weave-cancel').addEventListener('click', () => $('#weave-dialog').close());
+$('#info-close').addEventListener('click', () => $('#info-dialog').close());
 $('#weave-go').addEventListener('click', (e) => {
   const dlg = $('#weave-dialog');
   const format = dlg.querySelector('input[name="wformat"]:checked')?.value || 'li_post';
