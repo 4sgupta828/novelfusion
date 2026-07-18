@@ -1363,6 +1363,15 @@ async function renderCorpus(view, stale) {
           <button class="secondary" type="submit">Discover</button>
         </div>
         <span class="corpus-form-hint">Neural web search (Exa). Results land <strong>quarantined</strong> — review and Admit the good ones before they enter the pipeline.</span>
+      </form>
+      <form class="corpus-discover" id="footprint-form">
+        <span class="corpus-form-label">◍ Sweep a company's public footprint</span>
+        <div class="corpus-form-row">
+          <input type="text" id="footprint-company" placeholder="Company name, e.g. “Bessemer Venture Partners”" aria-label="Company name" autocomplete="off" />
+          <input type="text" id="footprint-domain" placeholder="domain (optional)" aria-label="Company domain" autocomplete="off" style="max-width:180px" />
+          <button class="secondary" type="submit">Sweep</button>
+        </div>
+        <span class="corpus-form-hint">Public web only (site, blog, interviews, press), last 5 years, <strong>auto-tagged as voice</strong> → build a persona in <strong>Voice</strong>. Walled platforms (LinkedIn/X/IG) are not scraped.</span>
       </form>`
     : '';
 
@@ -1538,6 +1547,23 @@ function wireCorpus(view) {
         r.created.length > 0
           ? `${r.created.length} source${r.created.length === 1 ? '' : 's'} discovered → quarantine${r.skipped ? ` · ${r.skipped} skipped` : ''}. Review & Admit below.`
           : `No new sources found${r.skipped ? ` (${r.skipped} were dupes/unreadable)` : ''}.`,
+      );
+      render();
+    });
+  });
+
+  // Company footprint sweep (flag-gated) — public web → admitted, voice-tagged sources.
+  $('#footprint-form', view)?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const company = $('#footprint-company', view).value.trim();
+    const domain = $('#footprint-domain', view).value.trim();
+    if (company.length < 2) return void toast('Enter a company name.', true);
+    busy(e.submitter, async () => {
+      const r = await api(`${state.ws}/footprint`, { method: 'POST', body: { company, domain: domain || undefined } });
+      toast(
+        r.created.length > 0
+          ? `${r.created.length} footprint source${r.created.length === 1 ? '' : 's'} for ${esc(r.company)} (since ${r.windowFrom}) → voice corpus. Distill a persona in Voice.`
+          : `No public footprint found for ${esc(r.company)}${r.skipped ? ` (${r.skipped} dupes/unreadable)` : ''}.`,
       );
       render();
     });

@@ -46,6 +46,7 @@ import {
 } from './db/index.js';
 import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
 import { discoverSources } from './pipeline/discover.js';
+import { sweepFootprint } from './pipeline/footprint.js';
 import { kickBackfill, startBackfillWorker } from './pipeline/backfill.js';
 import { clusterPrinciples } from './pipeline/clusters.js';
 import { captureEditContent } from './pipeline/edits.js';
@@ -400,6 +401,16 @@ app.post('/api/:ws/discover', wrap(async (req, res) => {
   const topic = req.body?.topic;
   if (typeof topic !== 'string' || topic.trim().length < 3) throw new Error('topic is required (min 3 chars)');
   res.json(await discoverSources(param(req, 'ws'), topic.trim()));
+}));
+
+// Company footprint sweep: public-web presence (site/blog/interviews/press) → voice corpus.
+app.post('/api/:ws/footprint', wrap(async (req, res) => {
+  if (!config.flags.sourceDiscovery) return void res.status(404).json({ error: 'source discovery is disabled (flag NF_FLAG_SOURCE_DISCOVERY off)' });
+  const company = req.body?.company;
+  if (typeof company !== 'string' || company.trim().length < 2) throw new Error('company name is required (min 2 chars)');
+  const domain = typeof req.body?.domain === 'string' && req.body.domain.trim() ? req.body.domain.trim() : undefined;
+  const years = Number.isFinite(req.body?.years) ? Math.max(1, Math.min(15, req.body.years)) : 5;
+  res.json(await sweepFootprint(param(req, 'ws'), company.trim(), { domain, years }));
 }));
 
 app.post('/api/:ws/sources/:id/admit', wrap((req, res) => {

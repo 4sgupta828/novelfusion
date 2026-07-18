@@ -22,8 +22,16 @@ function trace(rec: Record<string, unknown>): void {
   fs.appendFileSync(config.tracePath, JSON.stringify({ at: new Date().toISOString(), provider: 'exa', ...rec }) + '\n');
 }
 
-/** Neural search for a query → public-web results with extracted text. */
-export async function exaSearch(query: string, numResults = 5): Promise<ExaResult[]> {
+export interface ExaOpts {
+  numResults?: number;
+  includeDomains?: string[]; // restrict to the company's own domain(s)
+  startPublishedDate?: string; // ISO date — the footprint window (e.g. last 5 years)
+}
+
+/** Neural search for a query → public-web results with extracted text. Options push domain-scope
+ *  and a published-date window to Exa natively (used by the company-footprint sweep). */
+export async function exaSearch(query: string, opts: number | ExaOpts = 5): Promise<ExaResult[]> {
+  const o: ExaOpts = typeof opts === 'number' ? { numResults: opts } : opts;
   const key = process.env.EXA_API_KEY;
   if (!key) throw new Error('No EXA_API_KEY — source discovery needs it. Add it to .env, or disable NF_FLAG_SOURCE_DISCOVERY.');
 
@@ -33,7 +41,9 @@ export async function exaSearch(query: string, numResults = 5): Promise<ExaResul
     body: JSON.stringify({
       query,
       type: 'auto',
-      numResults,
+      numResults: o.numResults ?? 5,
+      ...(o.includeDomains?.length ? { includeDomains: o.includeDomains } : {}),
+      ...(o.startPublishedDate ? { startPublishedDate: o.startPublishedDate } : {}),
       contents: { text: { maxCharacters: MAX_TEXT_CHARS } },
     }),
     signal: AbortSignal.timeout(30000),
@@ -46,6 +56,6 @@ export async function exaSearch(query: string, numResults = 5): Promise<ExaResul
   const results = (data.results ?? [])
     .filter((r) => r.url && r.text && r.text.trim().length > 0)
     .map((r) => ({ url: r.url!, title: (r.title ?? '').trim(), text: r.text!.trim(), publishedDate: r.publishedDate }));
-  trace({ stage: 'exa_search', queryChars: query.length, requested: numResults, returned: results.length });
+  trace({ stage: 'exa_search', queryChars: query.length, requested: o.numResults ?? 5, domains: o.includeDomains?.length ?? 0, returned: results.length });
   return results;
 }
