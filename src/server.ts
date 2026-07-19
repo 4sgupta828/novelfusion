@@ -668,10 +668,20 @@ app.post('/api/:ws/fusion/render', wrap(async (req, res) => {
   const talkId = typeof req.body?.talkId === 'string' && req.body.talkId ? req.body.talkId : undefined;
   const momentId = typeof req.body?.momentId === 'string' && req.body.momentId ? req.body.momentId : undefined;
   const sourceId = typeof req.body?.sourceId === 'string' && req.body.sourceId ? req.body.sourceId : undefined;
-  const voice = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].includes(req.body?.voice) ? req.body.voice : undefined;
-  const format = ['16:9', '9:16', '1:1'].includes(req.body?.format) ? req.body.format : undefined;
+  const b = req.body ?? {};
+  const pick = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined => (typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : undefined);
+  const voice = pick(b.voice, ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const);
+  const voiceModel = pick(b.voiceModel, ['tts-1', 'tts-1-hd', 'gpt-4o-mini-tts'] as const);
+  const theme = pick(b.theme, ['midnight', 'aurora', 'editorial', 'noir', 'sunrise'] as const);
+  const format = pick(b.format, ['16:9', '9:16', '1:1'] as const);
+  const transition = pick(b.transition, ['fade', 'crossfade', 'cut'] as const);
+  const motion = pick(b.motion, ['kenburns', 'static'] as const);
+  const speed = typeof b.speed === 'number' && b.speed >= 0.25 && b.speed <= 4 ? b.speed : undefined;
+  const captions = b.captions === true;
+  const voiceInstructions = typeof b.voiceInstructions === 'string' && b.voiceInstructions.trim() ? b.voiceInstructions.trim().slice(0, 400) : undefined;
+  const tone = typeof b.tone === 'string' && b.tone.trim() ? b.tone.trim().slice(0, 120) : undefined;
   try {
-    const video = await renderFusionVideo(ws, { talkId, momentId, sourceId, voice, format });
+    const video = await renderFusionVideo(ws, { talkId, momentId, sourceId, voice, voiceModel, voiceInstructions, speed, theme, format, transition, motion, captions, tone });
     res.json(video);
   } catch (e) {
     if (e instanceof FusionError) return void res.status(422).json({ error: e.message, code: e.code });

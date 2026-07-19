@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS fusion_videos (
   origin TEXT NOT NULL DEFAULT 'talk',     -- 'talk' | 'source' | 'moment'
   origin_id TEXT,
   voice TEXT NOT NULL DEFAULT 'alloy',
+  theme TEXT NOT NULL DEFAULT 'midnight',
   format TEXT NOT NULL DEFAULT '16:9',
   scenes TEXT NOT NULL DEFAULT '[]',       -- JSON StoryboardScene[]
   duration_sec REAL NOT NULL DEFAULT 0,

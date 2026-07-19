@@ -64,6 +64,7 @@ function migrate(d: Database.Database): void {
   addCols('sources', [['admitted', 'INTEGER NOT NULL DEFAULT 1'], ['is_voice', 'INTEGER NOT NULL DEFAULT 0']]);
   addCols('principles', [['cluster_id', 'TEXT']]);
   addCols('edit_events', [['author_id', 'TEXT']]);
+  addCols('fusion_videos', [['theme', "TEXT NOT NULL DEFAULT 'midnight'"]]);
 
   // Relax the old speaker NOT NULL constraint (docs/web segments have no speaker).
   // SQLite can't ALTER a column constraint, so rebuild the table. Safe: nothing has
@@ -777,6 +778,7 @@ function rowToFusionVideo(r: Record<string, unknown>): FusionVideo {
     origin: (r.origin as string) ?? 'talk',
     originId: (r.origin_id as string) ?? null,
     voice: (r.voice as string) ?? 'alloy',
+    theme: (r.theme as string) ?? 'midnight',
     format: r.format as FusionVideo['format'],
     scenes: JSON.parse((r.scenes as string) ?? '[]'),
     durationSec: (r.duration_sec as number) ?? 0,
@@ -792,10 +794,10 @@ export function insertFusionVideo(v: Omit<FusionVideo, 'id' | 'createdAt'>): Fus
   const id = newId('fusion');
   getDb()
     .prepare(
-      `INSERT INTO fusion_videos (id, workspace_id, title, origin, origin_id, voice, format, scenes, duration_sec, filename, file_path, mime, size)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO fusion_videos (id, workspace_id, title, origin, origin_id, voice, theme, format, scenes, duration_sec, filename, file_path, mime, size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(id, v.workspaceId, v.title, v.origin, v.originId, v.voice, v.format, JSON.stringify(v.scenes), v.durationSec, v.filename, v.filePath, v.mime, v.size);
+    .run(id, v.workspaceId, v.title, v.origin, v.originId, v.voice, v.theme, v.format, JSON.stringify(v.scenes), v.durationSec, v.filename, v.filePath, v.mime, v.size);
   return getFusionVideo(v.workspaceId, id)!;
 }
 

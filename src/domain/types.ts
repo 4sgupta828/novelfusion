@@ -241,7 +241,12 @@ export interface RenderedClip {
   createdAt: string;
 }
 
-export type SceneVisual = 'title' | 'bullets' | 'stat' | 'quote' | 'chart';
+export type SceneVisual =
+  | 'title' | 'bullets' | 'stat' | 'quote' | 'chart'
+  | 'comparison' | 'timeline' | 'bignumbers' | 'donut';
+
+/** Visual theme for a fusion video (palette + background + typography). */
+export type FusionTheme = 'midnight' | 'aurora' | 'editorial' | 'noir' | 'sunrise';
 
 /** One scene of a fusion-video storyboard: what the voiceover says + what shows on screen. */
 export interface StoryboardScene {
@@ -253,6 +258,10 @@ export interface StoryboardScene {
   stat?: { value: string; label: string };
   quote?: { text: string; attribution?: string };
   chart?: { unit?: string; bars: { label: string; value: number }[] };
+  comparison?: { left: { heading: string; items: string[] }; right: { heading: string; items: string[] } };
+  timeline?: { steps: { label: string; detail?: string }[] };
+  bignumbers?: { items: { value: string; label: string }[] };
+  donut?: { value: number; label: string; unit?: string };
 }
 
 /** An EXPERIMENTAL generated fusion video (ngram-style): storyboard + canvas infographics + AI
@@ -264,6 +273,7 @@ export interface FusionVideo {
   origin: string; // 'talk' | 'source' | 'moment'
   originId: string | null;
   voice: string;
+  theme: string;
   format: ClipFormat;
   scenes: StoryboardScene[];
   durationSec: number;

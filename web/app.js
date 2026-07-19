@@ -1461,6 +1461,32 @@ function talkKitHtml(kit) {
   </div>`;
 }
 
+const FUSION_THEMES = ['midnight', 'aurora', 'editorial', 'noir', 'sunrise'];
+const FUSION_VOICES = ['alloy', 'nova', 'onyx', 'shimmer', 'fable', 'echo'];
+const FUSION_MODELS = [['tts-1', 'standard'], ['tts-1-hd', 'HD'], ['gpt-4o-mini-tts', 'steerable']];
+const fsel = (cls, title, opts) => `<select class="${cls}" title="${title}" aria-label="${title}">${opts.map((o) => { const [v, label] = Array.isArray(o) ? o : [o, o]; return `<option value="${v}">${esc(label)}</option>`; }).join('')}</select>`;
+
+function fusionBarHtml() {
+  return `<div class="fusion-bar">
+    <button class="secondary act-fusion" title="Generate an experimental fusion video — storyboard + infographics + AI voiceover">🎬 Fusion video</button>
+    <details class="fusion-opts"><summary>options</summary>
+      <div class="fusion-opts-grid">
+        <label>Theme ${fsel('fusion-theme', 'Theme', FUSION_THEMES)}</label>
+        <label>Aspect ${fsel('fusion-format', 'Aspect', ['16:9', '9:16', '1:1'])}</label>
+        <label>Voice ${fsel('fusion-voice', 'Voice', FUSION_VOICES)}</label>
+        <label>Model ${fsel('fusion-model', 'Voice model', FUSION_MODELS)}</label>
+        <label>Transition ${fsel('fusion-transition', 'Transition', [['fade', 'dip to black'], ['crossfade', 'crossfade'], ['cut', 'hard cut']])}</label>
+        <label>Motion ${fsel('fusion-motion', 'Motion', [['kenburns', 'ken burns'], ['static', 'static']])}</label>
+        <label>Speed ${fsel('fusion-speed', 'Speed', [['1', '1.0×'], ['0.9', '0.9×'], ['1.1', '1.1×'], ['1.25', '1.25×']])}</label>
+        <label class="fusion-cap"><input type="checkbox" class="fusion-captions"> captions</label>
+        <label class="fusion-wide">Tone <input type="text" class="fusion-tone" placeholder="e.g. punchy, authoritative, playful" autocomplete="off"></label>
+        <label class="fusion-wide fusion-steer">Voice direction <input type="text" class="fusion-instructions" placeholder="steerable model only — e.g. warm, energetic narrator" autocomplete="off"></label>
+      </div>
+    </details>
+    <div class="fusion-slot"></div>
+  </div>`;
+}
+
 function talkCardHtml(talk, i) {
   const segs = (talk.outline || []).map((s) => {
     const chips = (s.utteranceIds || []).map((id) => talk._byId[id]).filter(Boolean).map(chipHtml).join('');
@@ -1490,12 +1516,7 @@ function talkCardHtml(talk, i) {
       <details class="talk-outline"><summary>${talk.outline.length} segments · outline</summary><ol class="talk-segs">${segs}</ol></details>
       ${talk.buildsOn?.length ? `<p class="talk-buildson">Builds on: ${talk.buildsOn.map((b) => `<span class="talk-tag">${esc(b)}</span>`).join(' ')}</p>` : ''}
       <div class="talk-actions">${actions}</div>
-      ${state.serverFlags?.fusionVideo ? `<div class="fusion-bar">
-        <button class="secondary act-fusion" title="Generate an experimental fusion video — storyboard + infographics + AI voiceover">🎬 Fusion video</button>
-        <select class="fusion-voice" title="Voiceover" aria-label="Voice">${['alloy', 'nova', 'onyx', 'shimmer', 'fable', 'echo'].map((v) => `<option value="${v}">${v}</option>`).join('')}</select>
-        <select class="fusion-format" title="Aspect" aria-label="Aspect">${['16:9', '9:16', '1:1'].map((f) => `<option value="${f}">${f}</option>`).join('')}</select>
-        <div class="fusion-slot"></div>
-      </div>` : ''}
+      ${state.serverFlags?.fusionVideo ? fusionBarHtml() : ''}
       <div class="talk-kit-slot" data-kit-for="${esc(talk.id)}"></div>
     </article>`;
 }
@@ -1560,12 +1581,20 @@ async function renderTalks(view, stale) {
       }));
     $('.act-fusion', card)?.addEventListener('click', (e) => {
       const fslot = $('.fusion-slot', card);
-      const voice = $('.fusion-voice', card)?.value || 'alloy';
-      const format = $('.fusion-format', card)?.value || '16:9';
+      const val = (cls) => $(`.${cls}`, card)?.value || undefined;
+      const body = {
+        talkId: talk.id,
+        theme: val('fusion-theme'), format: val('fusion-format'),
+        voice: val('fusion-voice'), voiceModel: val('fusion-model'),
+        transition: val('fusion-transition'), motion: val('fusion-motion'),
+        speed: Number(val('fusion-speed') || '1'),
+        captions: $('.fusion-captions', card)?.checked === true,
+        tone: val('fusion-tone'), voiceInstructions: val('fusion-instructions'),
+      };
       busy(e.target, async () => {
         fslot.innerHTML = '<p class="fusion-working">Directing your fusion video — storyboard → infographics → voiceover → assembly. This takes a minute…</p>';
         try {
-          const v = await api(`${state.ws}/fusion/render`, { method: 'POST', body: { talkId: talk.id, voice, format } });
+          const v = await api(`${state.ws}/fusion/render`, { method: 'POST', body });
           const url = `/api/${state.ws}/fusion/${v.id}/file`;
           fslot.innerHTML = `<video class="fusion-video" src="${url}" controls preload="metadata"></video>
             <div class="fusion-meta">${v.scenes.length} scenes · ${v.durationSec.toFixed(0)}s · ${(v.size / 1e6).toFixed(1)}MB

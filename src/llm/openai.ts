@@ -31,12 +31,28 @@ export function openaiTrace(rec: Record<string, unknown>): void {
 }
 
 export type TtsVoice = 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+export type TtsModel = 'tts-1' | 'tts-1-hd' | 'gpt-4o-mini-tts';
+
+export interface SpeechOpts {
+  voice?: TtsVoice;
+  model?: TtsModel;
+  /** Steerable delivery direction — ONLY honored by gpt-4o-mini-tts (ignored by tts-1/tts-1-hd). */
+  instructions?: string;
+  /** Playback speed 0.25–4.0 (default 1.0). */
+  speed?: number;
+}
 
 /** Synthesize speech (voiceover) from text via OpenAI TTS. Returns mp3 bytes. Fails loudly — the
- *  caller (fusion video) treats an error as a failed render. */
-export async function synthesizeSpeech(text: string, voice: TtsVoice = 'alloy', model = 'tts-1'): Promise<Buffer> {
-  const res = await getOpenAI().audio.speech.create({ model, voice, input: text, response_format: 'mp3' });
+ *  caller (fusion video) treats an error as a failed render. tts-1 is fast/cheap; tts-1-hd is higher
+ *  fidelity; gpt-4o-mini-tts is steerable via `instructions` (tone/emotion/pace). */
+export async function synthesizeSpeech(text: string, opts: SpeechOpts = {}): Promise<Buffer> {
+  const model: TtsModel = opts.model ?? 'tts-1';
+  const voice: TtsVoice = opts.voice ?? 'alloy';
+  const speed = Math.max(0.25, Math.min(4, opts.speed ?? 1));
+  const req: Record<string, unknown> = { model, voice, input: text, response_format: 'mp3', speed };
+  if (model === 'gpt-4o-mini-tts' && opts.instructions) req.instructions = opts.instructions;
+  const res = await getOpenAI().audio.speech.create(req as unknown as Parameters<OpenAI['audio']['speech']['create']>[0]);
   const buf = Buffer.from(await res.arrayBuffer());
-  openaiTrace({ stage: 'tts', model, voice, chars: text.length, bytes: buf.length });
+  openaiTrace({ stage: 'tts', model, voice, speed, steered: !!(model === 'gpt-4o-mini-tts' && opts.instructions), chars: text.length, bytes: buf.length });
   return buf;
 }

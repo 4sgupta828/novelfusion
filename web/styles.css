@@ -912,7 +912,13 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 /* ---------- fusion video (experimental) ---------- */
 .fusion-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 6px; padding: 8px 12px; background: color-mix(in srgb, var(--violet-soft) 55%, transparent); border-radius: var(--radius-sm); }
 .fusion-bar .act-fusion { border-color: var(--violet); color: var(--violet); }
-.fusion-bar select { padding: 4px 8px; font-size: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); }
+.fusion-bar select, .fusion-bar input[type="text"] { padding: 4px 8px; font-size: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); }
+.fusion-opts { flex-basis: 100%; margin-top: 2px; }
+.fusion-opts > summary { cursor: pointer; font-size: 12px; color: var(--violet); font-family: var(--mono); }
+.fusion-opts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 12px; margin-top: 10px; }
+.fusion-opts-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.fusion-opts-grid .fusion-wide { grid-column: 1 / -1; }
+.fusion-opts-grid .fusion-cap { flex-direction: row; align-items: center; gap: 6px; text-transform: none; }
 .fusion-slot { flex-basis: 100%; }
 .fusion-slot:empty { display: none; }
 .fusion-working { font-size: 12.5px; color: var(--violet); font-style: italic; }
