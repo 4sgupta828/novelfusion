@@ -589,6 +589,12 @@ const clampSel = (count) => {
 /* ---------- per-page help (collapsible "How this works") ---------- */
 
 const HELP = {
+  consent: {
+    title: 'How the Consent ledger works',
+    body: `<p><strong>The Consent ledger is per-person, scoped permission — the primitive that lets NovelFusion prove "consented, not deepfake."</strong> It upgrades consent from a source-level label to real grants: a named person consents to a specific <em>scope</em> of use, on specific channels, with a departure clause and an evidence note.</p>
+      <p><strong>The scope ladder</strong> (each is granted explicitly — wider does NOT imply narrower): <em>quote</em> (attribute their words) · <em>clip</em> (use real footage of them) · <em>likeness</em> (a synthetic face) · <em>voice_clone</em> (a synthetic voice). A real-footage clip needs <em>clip</em>; a synthetic presenter needs <em>both likeness and voice_clone</em>.</p>
+      <p><strong>The gate is code, not a model, and it fails closed.</strong> Any asset whose likeness/voice/clip isn't covered by an active grant is blocked — deterministically. Revoking a grant is instant and never deletes it (the row stays for the audit trail). This ledger is the foundation for real-footage clips and, later, consented-likeness video — nothing synthetic renders without a covering grant.</p>`,
+  },
   talks: {
     title: 'How the Talk Slate works',
     body: `<p><strong>The Talk Slate proposes long-form talks your corpus can actually support.</strong> Where Ideas surfaces post-sized angles, this steps up to whole talks — webinars, workshops, conference sessions, podcasts, sales sessions, internal training. The AI reads across your corpus, looks at what you've <em>already delivered</em>, and proposes fresh talks you could give — each tied to a concrete <em>goal</em> (train, educate, enable sales, drive demand, establish authority, recruit, deep-dive) and a positive <em>outcome</em> for the company.</p>
@@ -1592,6 +1598,94 @@ async function renderVoice(view, stale) {
   });
 }
 
+/* ---------- consent ledger: per-person scoped grants + the gate ---------- */
+
+const SCOPE_META = {
+  quote: { label: 'quote', hint: 'attribute their words' },
+  clip: { label: 'clip', hint: 'real footage of them' },
+  likeness: { label: 'likeness', hint: 'synthetic face' },
+  voice_clone: { label: 'voice clone', hint: 'synthetic voice' },
+};
+const SCOPE_ORDER = ['quote', 'clip', 'likeness', 'voice_clone'];
+const CONSENT_CHANNELS = ['all', 'li_post', 'x_thread', 'blog', 'clip_spec'];
+
+async function renderConsent(view, stale) {
+  await loadCollaborators();
+  const grants = await api(`${state.ws}/consent`);
+  if (stale()) return;
+  setBudget(0);
+
+  const experts = state.collaborators || [];
+  const form = `<form class="consent-form" id="consent-form">
+    <div class="consent-form-row">
+      <input type="text" id="consent-subject" list="consent-people" placeholder="Person's name (e.g. Jane Doe)" autocomplete="off" required />
+      <datalist id="consent-people">${experts.map((c) => `<option value="${esc(c.name)}">`).join('')}</datalist>
+    </div>
+    <div class="consent-scopes" role="group" aria-label="Scopes">
+      ${SCOPE_ORDER.map((s) => `<label class="consent-scope"><input type="checkbox" name="scope" value="${s}"> <span>${SCOPE_META[s].label}</span><em>${SCOPE_META[s].hint}</em></label>`).join('')}
+    </div>
+    <div class="consent-form-row consent-channels" role="group" aria-label="Channels">
+      <span class="consent-lbl">Channels</span>
+      ${CONSENT_CHANNELS.map((c, i) => `<label class="consent-chan"><input type="checkbox" name="channel" value="${c}"${i === 0 ? ' checked' : ''}> ${c === 'all' ? 'all' : esc(c.replace('_', ' '))}</label>`).join('')}
+    </div>
+    <div class="consent-form-row">
+      <input type="text" id="consent-evidence" placeholder="Evidence (how consent was obtained — release form, email, recorded)" autocomplete="off" />
+      <label class="consent-dep"><input type="checkbox" id="consent-survives"> survives departure</label>
+      <button class="primary" type="submit">Add grant</button>
+    </div>
+  </form>`;
+
+  // group by person (subjectLabel)
+  const byPerson = new Map();
+  grants.forEach((g) => { const k = g.subjectLabel; (byPerson.get(k) || byPerson.set(k, []).get(k)).push(g); });
+  const chip = (g) => `<div class="consent-grant${g.revokedAt ? ' revoked' : ''}" data-id="${esc(g.id)}">
+      <div class="consent-grant-scopes">${g.scopes.map((s) => `<span class="consent-scope-tag scope-${s}">${SCOPE_META[s]?.label || s}</span>`).join('')}</div>
+      <div class="consent-grant-meta">
+        <span>${g.channels.includes('all') ? 'all channels' : esc(g.channels.join(', '))}</span>
+        ${g.survivesDeparture ? '<span class="consent-dep-tag">survives departure</span>' : ''}
+        ${g.evidence ? `<span class="consent-ev" title="${esc(g.evidence)}">📎 evidence</span>` : '<span class="consent-noev" title="No evidence recorded">⚠ no evidence</span>'}
+        ${g.revokedAt ? `<span class="consent-revoked-tag">revoked ${esc((g.revokedAt || '').slice(0, 10))}</span>` : ''}
+      </div>
+      ${g.revokedAt ? '' : '<button class="ghost consent-revoke">Revoke</button>'}
+    </div>`;
+  const people = [...byPerson.entries()].map(([name, gs]) => `<section class="consent-person">
+      <h3 class="consent-person-name">${esc(name)}</h3>
+      <div class="consent-grants">${gs.map(chip).join('')}</div>
+    </section>`).join('');
+
+  const body = grants.length === 0
+    ? `<div class="empty">No consent grants yet.<div class="hint">Record who has agreed to what — a <em>clip</em> grant lets a real-footage clip of them be published; <em>likeness</em> + <em>voice clone</em> are required before any synthetic presenter of them can render. The gate blocks anything uncovered.</div></div>`
+    : people;
+
+  view.innerHTML = helpPanel('consent') + form + body;
+  wireHelp(view);
+
+  $('#consent-form', view)?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const subjectLabel = $('#consent-subject', view).value.trim();
+    const scopes = $$('input[name="scope"]:checked', view).map((i) => i.value);
+    let channels = $$('input[name="channel"]:checked', view).map((i) => i.value);
+    if (channels.includes('all')) channels = ['all'];
+    if (subjectLabel.length < 2) { toast('Enter a person name.', true); return; }
+    if (scopes.length === 0) { toast('Pick at least one scope.', true); return; }
+    busy(e.submitter, async () => {
+      await api(`${state.ws}/consent`, { method: 'POST', body: {
+        subjectLabel, scopes, channels: channels.length ? channels : ['all'],
+        survivesDeparture: $('#consent-survives', view).checked,
+        evidence: $('#consent-evidence', view).value.trim(),
+      } });
+      toast(`Consent recorded for ${subjectLabel}.`);
+      render();
+    });
+  });
+
+  $$('.consent-revoke', view).forEach((b) => b.addEventListener('click', async () => {
+    const id = b.closest('.consent-grant').dataset.id;
+    try { await api(`${state.ws}/consent/${id}/revoke`, { method: 'POST' }); toast('Grant revoked (kept for the audit trail).'); render(); }
+    catch (err) { toast(err.message, true); }
+  }));
+}
+
 async function renderGate(view, stale) {
   const metrics = await api(`${state.ws}/gate`);
   if (stale()) return;
@@ -2032,6 +2126,7 @@ const VIEWS = {
   constitution: { title: 'Constitution', render: renderConstitution },
   voice: { title: 'Voice', render: renderVoice },
   gate: { title: 'Phase 0 gate', render: renderGate },
+  consent: { title: 'Consent ledger', render: renderConsent },
 };
 
 function setBudget(minutes) {
@@ -2099,7 +2194,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const viewKeys = { 1: 'corpus', 2: 'slate', 3: 'ideas', 4: 'talks', 5: 'drafts', 6: 'constitution', 7: 'voice', 8: 'gate' };
+  const viewKeys = { 1: 'corpus', 2: 'slate', 3: 'ideas', 4: 'talks', 5: 'drafts', 6: 'constitution', 7: 'voice', 8: 'gate', 9: 'consent' };
   if (viewKeys[e.key] === 'talks' && !state.serverFlags?.talkKit) return; // flagged view unreachable when off
   if (viewKeys[e.key]) return switchView(viewKeys[e.key]);
 

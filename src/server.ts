@@ -30,6 +30,10 @@ import {
   saveDraftInfographic,
   listCollaborators,
   createCollaborator,
+  listConsentGrants,
+  insertConsentGrant,
+  revokeConsentGrant,
+  consentGate,
   getCollaborator,
   deleteCollaborator,
   listUtterances,
@@ -182,6 +186,49 @@ app.post('/api/:ws/collaborators', wrap((req, res) => {
 app.delete('/api/:ws/collaborators/:id', wrap((req, res) => {
   deleteCollaborator(param(req, 'ws'), param(req, 'id'));
   res.json({ ok: true });
+}));
+
+// ---------- consent ledger (per-person, scoped, revocable grants + the gate) ----------
+
+const CONSENT_SCOPES = ['quote', 'clip', 'likeness', 'voice_clone'];
+
+app.get('/api/:ws/consent', wrap((req, res) => {
+  res.json(listConsentGrants(param(req, 'ws')));
+}));
+
+app.post('/api/:ws/consent', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const subjectLabel = typeof req.body?.subjectLabel === 'string' ? req.body.subjectLabel.trim() : '';
+  if (subjectLabel.length < 2) throw new Error('a person name is required (min 2 chars)');
+  const scopes = Array.isArray(req.body?.scopes) ? req.body.scopes.filter((s: unknown) => CONSENT_SCOPES.includes(s as string)) : [];
+  if (scopes.length === 0) throw new Error('at least one consent scope is required (quote/clip/likeness/voice_clone)');
+  const channels = Array.isArray(req.body?.channels) && req.body.channels.length ? req.body.channels.map((c: unknown) => String(c)) : ['all'];
+  const grant = insertConsentGrant({
+    workspaceId: ws,
+    subjectLabel,
+    collaboratorId: typeof req.body?.collaboratorId === 'string' && req.body.collaboratorId ? req.body.collaboratorId : null,
+    scopes,
+    channels,
+    survivesDeparture: req.body?.survivesDeparture === true,
+    evidence: typeof req.body?.evidence === 'string' ? req.body.evidence.trim() : '',
+    grantedAt: typeof req.body?.grantedAt === 'string' && req.body.grantedAt ? req.body.grantedAt : null,
+  });
+  res.json(grant);
+}));
+
+app.post('/api/:ws/consent/:id/revoke', wrap((req, res) => {
+  revokeConsentGrant(param(req, 'ws'), param(req, 'id'));
+  res.json({ ok: true });
+}));
+
+// Probe the gate (for UI coverage display / future render blocks).
+app.get('/api/:ws/consent/check', wrap((req, res) => {
+  const ws = param(req, 'ws');
+  const subjectLabel = String(req.query.subject ?? '');
+  const scope = String(req.query.scope ?? '') as import('./domain/types.js').ConsentScope;
+  const channel = String(req.query.channel ?? 'all');
+  if (!subjectLabel || !CONSENT_SCOPES.includes(scope)) return void res.status(400).json({ error: 'subject and a valid scope are required' });
+  res.json(consentGate(ws, { subjectLabel, scope, channel }));
 }));
 
 // ---------- ideas (scratch space upstream of the slate) ----------

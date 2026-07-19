@@ -187,6 +187,35 @@ export interface Collaborator {
   createdAt: string;
 }
 
+/** Consent scope ladder, narrowest → widest. A real-footage clip needs `clip`; a synthetic presenter
+ *  needs BOTH `likeness` and `voice_clone`. Wider scopes do NOT imply narrower ones — a grant lists
+ *  exactly what was consented. */
+export type ConsentScope = 'quote' | 'clip' | 'likeness' | 'voice_clone';
+
+/** A per-person, scoped, revocable consent grant — the ledger primitive (PRD §7/§8, SYNTHESIS §8).
+ *  Never hard-deleted: revocation sets revokedAt, preserving the audit trail. */
+export interface ConsentGrant {
+  id: string;
+  workspaceId: string;
+  subject: string; // normalized person key (lowercased name) used for matching
+  subjectLabel: string; // display name as entered
+  collaboratorId: string | null; // optional link to a collaborator
+  scopes: ConsentScope[];
+  channels: string[]; // ['all'] or specific channel keys
+  survivesDeparture: boolean; // does the grant persist if the person leaves?
+  evidence: string; // how consent was obtained — the audit anchor
+  grantedAt: string | null;
+  revokedAt: string | null; // null = active
+  createdAt: string;
+}
+
+/** Result of the deterministic consent gate. `covered:false` is fail-closed (the default). */
+export interface ConsentDecision {
+  covered: boolean;
+  reason: string;
+  grantId?: string;
+}
+
 export type IdeaOrigin = 'cluster' | 'brainstorm';
 export type IdeaStatus = 'open' | 'promoted' | 'dismissed';
 

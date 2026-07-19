@@ -4,10 +4,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
+import { decideConsent } from '../domain/consent.js';
 import type {
   Cluster,
   Collaborator,
   Idea,
+  ConsentGrant,
+  ConsentScope,
+  ConsentDecision,
   TalkProposal,
   TalkKit,
   VoicePersona,
@@ -618,6 +622,84 @@ export function deleteCollaborator(workspaceId: string, id: string): void {
     getDb().prepare('DELETE FROM collaborators WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
   });
   tx();
+}
+
+// ---------- consent grants (per-person, scoped, revocable) ----------
+
+/** Normalized person key for matching a grant to a subject — structural identity (code owns
+ *  structure, Rule 18), not a semantic name-resolution. Lowercase + collapse whitespace. */
+export const normalizeSubject = (name: string) => name.trim().toLowerCase().replace(/\s+/g, ' ');
+
+function rowToConsentGrant(r: Record<string, unknown>): ConsentGrant {
+  return {
+    id: r.id as string,
+    workspaceId: r.workspace_id as string,
+    subject: r.subject as string,
+    subjectLabel: r.subject_label as string,
+    collaboratorId: (r.collaborator_id as string) ?? null,
+    scopes: JSON.parse((r.scopes as string) ?? '[]'),
+    channels: JSON.parse((r.channels as string) ?? '["all"]'),
+    survivesDeparture: (r.survives_departure as number) === 1,
+    evidence: (r.evidence as string) ?? '',
+    grantedAt: (r.granted_at as string) ?? null,
+    revokedAt: (r.revoked_at as string) ?? null,
+    createdAt: r.created_at as string,
+  };
+}
+
+export type NewConsentGrant = Omit<ConsentGrant, 'id' | 'subject' | 'revokedAt' | 'createdAt'>;
+
+export function insertConsentGrant(g: NewConsentGrant): ConsentGrant {
+  const id = newId('consent');
+  getDb()
+    .prepare(
+      `INSERT INTO consent_grants (id, workspace_id, subject, subject_label, collaborator_id, scopes, channels, survives_departure, evidence, granted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      g.workspaceId,
+      normalizeSubject(g.subjectLabel),
+      g.subjectLabel,
+      g.collaboratorId,
+      JSON.stringify(g.scopes),
+      JSON.stringify(g.channels.length ? g.channels : ['all']),
+      g.survivesDeparture ? 1 : 0,
+      g.evidence,
+      g.grantedAt ?? new Date().toISOString(),
+    );
+  return getConsentGrant(g.workspaceId, id)!;
+}
+
+export function getConsentGrant(workspaceId: string, id: string): ConsentGrant | null {
+  const r = getDb().prepare('SELECT * FROM consent_grants WHERE workspace_id = ? AND id = ?').get(workspaceId, id) as Record<string, unknown> | undefined;
+  return r ? rowToConsentGrant(r) : null;
+}
+
+export function listConsentGrants(workspaceId: string, opts: { activeOnly?: boolean } = {}): ConsentGrant[] {
+  const sql = opts.activeOnly
+    ? 'SELECT * FROM consent_grants WHERE workspace_id = ? AND revoked_at IS NULL ORDER BY subject, created_at DESC'
+    : 'SELECT * FROM consent_grants WHERE workspace_id = ? ORDER BY subject, created_at DESC';
+  return (getDb().prepare(sql).all(workspaceId) as Record<string, unknown>[]).map(rowToConsentGrant);
+}
+
+/** Active (non-revoked) grants for a given person (matched by normalized name). */
+export function activeGrantsForSubject(workspaceId: string, subjectLabel: string): ConsentGrant[] {
+  const subject = normalizeSubject(subjectLabel);
+  return (
+    getDb().prepare('SELECT * FROM consent_grants WHERE workspace_id = ? AND subject = ? AND revoked_at IS NULL').all(workspaceId, subject) as Record<string, unknown>[]
+  ).map(rowToConsentGrant);
+}
+
+/** Revoke a grant (soft — sets revoked_at; never hard-deleted, per the audit-trail invariant). */
+export function revokeConsentGrant(workspaceId: string, id: string): void {
+  getDb().prepare('UPDATE consent_grants SET revoked_at = ? WHERE workspace_id = ? AND id = ? AND revoked_at IS NULL').run(new Date().toISOString(), workspaceId, id);
+}
+
+/** THE consent gate: does `subjectLabel` have covering consent for `scope` on `channel`? Deterministic
+ *  and fail-closed (code owns consent, Rule 18 exemption). Callers block an asset when covered:false. */
+export function consentGate(workspaceId: string, req: { subjectLabel: string; scope: ConsentScope; channel: string }): ConsentDecision {
+  return decideConsent(activeGrantsForSubject(workspaceId, req.subjectLabel), { scope: req.scope, channel: req.channel });
 }
 
 // ---------- ideas (scratch space upstream of the slate) ----------

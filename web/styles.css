@@ -868,3 +868,31 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 .ros-chips { margin-top: 6px; }
 .ros-notes { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; line-height: 1.5; }
 .ros-notes-label { font-family: var(--mono); font-size: 10px; text-transform: uppercase; color: var(--pencil); margin-right: 6px; }
+
+/* ---------- consent ledger ---------- */
+.consent-form { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 22px; box-shadow: var(--shadow); }
+.consent-form-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.consent-form-row:last-child { margin-bottom: 0; }
+.consent-form input[type="text"] { flex: 1; min-width: 200px; padding: 8px 12px; font: inherit; font-size: 13.5px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); }
+.consent-form input[type="text"]:focus { outline: 2px solid var(--pencil); outline-offset: -1px; }
+.consent-scopes { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.consent-scope { display: flex; align-items: center; gap: 5px; font-size: 12.5px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 5px 9px; cursor: pointer; }
+.consent-scope em { color: var(--muted); font-style: normal; font-size: 11px; }
+.consent-scope:has(input:checked) { border-color: var(--pencil); background: var(--pencil-soft); }
+.consent-channels, .consent-lbl { font-size: 12.5px; color: var(--muted); }
+.consent-chan { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.consent-dep { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); }
+
+.consent-person { margin-bottom: 20px; }
+.consent-person-name { font-family: var(--serif); font-size: 17px; margin: 0 0 10px; }
+.consent-grants { display: flex; flex-direction: column; gap: 8px; }
+.consent-grant { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 12px; background: var(--surface); }
+.consent-grant.revoked { opacity: 0.55; }
+.consent-grant-scopes { display: flex; gap: 5px; flex-wrap: wrap; }
+.consent-scope-tag { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em; border-radius: 999px; padding: 2px 8px; color: var(--pencil); background: var(--pencil-soft); }
+.scope-likeness, .scope-voice_clone { color: var(--violet); background: var(--violet-soft); }
+.consent-grant-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.consent-dep-tag { color: var(--green); }
+.consent-noev { color: var(--amber); }
+.consent-revoked-tag { color: var(--risk); font-family: var(--mono); font-size: 11px; }
+.consent-grant .consent-revoke { margin-left: auto; }

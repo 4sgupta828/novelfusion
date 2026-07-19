@@ -198,6 +198,29 @@ CREATE TABLE IF NOT EXISTS collaborators (
 );
 CREATE INDEX IF NOT EXISTS idx_collaborators_ws ON collaborators(workspace_id);
 
+-- Consent grants: per-person, scoped, revocable consent — the primitive that upgrades consent from
+-- source-level (sources.consent_basis) to a real ledger (PRD §7/§8; SYNTHESIS §8). A grant records
+-- that a named person consents to a SCOPE of use (quote ⊂ clip ⊂ likeness ⊂ voice_clone) on given
+-- channels, with a departure clause and an evidence anchor. The consent GATE (code-owned, Rule 18
+-- exemption) reads these to deterministically block any asset whose likeness/voice/clip isn't
+-- covered — the precondition for real-footage clips and (later, flagged) consented-likeness video.
+-- Revocation sets revoked_at; grants are never hard-deleted (audit trail).
+CREATE TABLE IF NOT EXISTS consent_grants (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  subject TEXT NOT NULL,                    -- normalized person key for matching (lowercased name)
+  subject_label TEXT NOT NULL,              -- display name as entered
+  collaborator_id TEXT,                     -- optional link to a collaborator
+  scopes TEXT NOT NULL DEFAULT '[]',        -- JSON: subset of ['quote','clip','likeness','voice_clone']
+  channels TEXT NOT NULL DEFAULT '["all"]', -- JSON: ['all'] or specific channel keys
+  survives_departure INTEGER NOT NULL DEFAULT 0,
+  evidence TEXT NOT NULL DEFAULT '',        -- how consent was obtained (ref/note) — the audit anchor
+  granted_at TEXT,                          -- when consent was obtained (nullable; defaults to created_at)
+  revoked_at TEXT,                          -- null = active; set = revoked (never hard-deleted)
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_consent_grants_ws ON consent_grants(workspace_id, subject);
+
 CREATE TABLE IF NOT EXISTS edit_events (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),
