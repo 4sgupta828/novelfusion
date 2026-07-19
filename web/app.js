@@ -652,6 +652,20 @@ function wireHelp(view) {
   );
 }
 
+/** A moment is clippable if all its receipts are timestamped spoken segments from ONE recording. */
+function momentClippable(m) {
+  const us = m.utterances || [];
+  return us.length > 0 && us.every((u) => u.tStartSec != null && u.speaker) && new Set(us.map((u) => u.sourceId)).size === 1;
+}
+function clipBar(m) {
+  if (!state.serverFlags?.clipRender || !momentClippable(m)) return '';
+  return `<div class="clip-bar">
+    <span class="clip-bar-label" title="Cut a real-footage clip from the recording, at these timestamps">🎬 Real-footage clip</span>
+    ${['16:9', '9:16', '1:1'].map((f) => `<button class="secondary act-clip" data-fmt="${f}">${f}</button>`).join('')}
+    <div class="clip-slot"></div>
+  </div>`;
+}
+
 async function renderSlate(view, stale) {
   const moments = await api(`${state.ws}/slate?top=5`);
   if (stale()) return;
@@ -683,6 +697,7 @@ async function renderSlate(view, stale) {
         ${m.judgment.riskFlags.map((r) => `<span class="pill risk" title="${esc(r.note)}">⚠ ${esc(r.kind.replace(/_/g, ' '))}</span>`).join('')}
       </div>
       <div class="chip-row">${m.utterances.map(chipHtml).join('')}</div>
+      ${clipBar(m)}
       <div class="card-actions">
         <button class="primary act-weave">Weave</button>
         <div class="chip-picker" role="group" aria-label="Reject with reason">
@@ -701,6 +716,22 @@ async function renderSlate(view, stale) {
     $$('.chip-picker button[data-chip]', card).forEach((b) =>
       b.addEventListener('click', () => rejectMoment(m.id, b.dataset.chip)),
     );
+    $$('.act-clip', card).forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const slot = $('.clip-slot', card);
+      busy(e.target, async () => {
+        slot.innerHTML = '<span class="clip-working">Cutting the real-footage clip…</span>';
+        try {
+          const clip = await api(`${state.ws}/clips/render`, { method: 'POST', body: { momentId: m.id, format: b.dataset.fmt } });
+          const url = `/api/${state.ws}/clips/${clip.id}/file`;
+          slot.innerHTML = `<video class="clip-video" src="${url}" controls preload="metadata"></video>
+            <a class="secondary clip-dl" href="${url}" download="clip-${clip.format.replace(':', 'x')}.mp4">↓ ${esc(clip.format)} · ${clip.durationSec.toFixed(1)}s · ${(clip.size / 1e6).toFixed(1)}MB</a>`;
+          toast('Real-footage clip rendered.');
+        } catch (err) {
+          slot.innerHTML = `<span class="clip-blocked">⚠ ${esc(err.message)}</span>`;
+        }
+      });
+    }));
     card.addEventListener('click', (e) => {
       if (e.target.closest('button')) return;
       state.sel = i;
@@ -1866,6 +1897,11 @@ function sourcesHtml(sources) {
             <span class="pill neutral">${s.segmentCount} passage${s.segmentCount === 1 ? '' : 's'}</span>
             <span class="pill neutral">${esc(CONSENT_LABEL[s.consentBasis] ?? s.consentBasis)}</span>
             <button class="pill act-voice ${s.isVoice ? 'voice-on' : 'voice-off'}" title="${s.isVoice ? 'Part of the voice corpus — the persona learns from this' : 'Mark as published brand voice (the persona learns from voice sources)'}">◍ voice</button>
+            ${state.serverFlags?.clipRender && s.timestampedCount > 0
+              ? (s.hasMedia
+                ? '<span class="pill active" title="Original recording attached — real clips can be cut from this">🎬 recording</span>'
+                : '<button class="pill act-attach-media" title="Attach the original audio/video so real-footage clips can be cut">🎬 attach recording</button>')
+              : ''}
             ${s.admitted
               ? '<span class="pill active" title="In the extraction pool">admitted</span>'
               : `<button class="secondary act-admit" title="Admit into the extraction pool">Admit</button>`}
@@ -2058,6 +2094,26 @@ function wireCorpus(view) {
         toast(!on ? 'Added to the voice corpus.' : 'Removed from the voice corpus.');
         render();
       });
+    });
+    $('.act-attach-media', wrap)?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'audio/*,video/*';
+      input.addEventListener('change', () => {
+        const f = input.files?.[0];
+        if (!f) return;
+        busy(e.currentTarget, async () => {
+          const fd = new FormData();
+          fd.append('file', f);
+          const r = await fetch(`/api/${state.ws}/sources/${wrap.dataset.id}/media`, { method: 'POST', headers: { 'X-NF-Workbench': '1' }, body: fd });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(d.error || `attach failed (${r.status})`);
+          toast(`Recording attached (${(f.size / 1e6).toFixed(1)} MB). Real clips can now be cut.`);
+          render();
+        });
+      });
+      input.click();
     });
     const toggle = async () => {
       const open = row.getAttribute('aria-expanded') === 'true';

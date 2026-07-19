@@ -896,3 +896,15 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 .consent-noev { color: var(--amber); }
 .consent-revoked-tag { color: var(--risk); font-family: var(--mono); font-size: 11px; }
 .consent-grant .consent-revoke { margin-left: auto; }
+
+/* ---------- real-footage clip render ---------- */
+.act-attach-media { cursor: pointer; border-color: var(--violet); color: var(--violet); }
+.clip-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; padding: 8px 12px; background: color-mix(in srgb, var(--pencil-soft) 55%, transparent); border-radius: var(--radius-sm); }
+.clip-bar-label { font-family: var(--mono); font-size: 12px; color: var(--pencil); }
+.clip-bar .act-clip { padding: 3px 10px; font-family: var(--mono); font-size: 12px; }
+.clip-slot { flex-basis: 100%; }
+.clip-slot:empty { display: none; }
+.clip-working { font-size: 12.5px; color: var(--muted); font-style: italic; }
+.clip-blocked { font-size: 12.5px; color: var(--amber); }
+.clip-video { display: block; max-width: 320px; width: 100%; border-radius: var(--radius-sm); margin: 8px 0 6px; background: #000; }
+.clip-dl { display: inline-block; }

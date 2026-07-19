@@ -216,6 +216,31 @@ export interface ConsentDecision {
   grantId?: string;
 }
 
+export type ClipFormat = '16:9' | '9:16' | '1:1';
+
+/** A rendered real-footage clip — provenance-clean video cut from a source's retained recording at a
+ *  moment's timestamps, authorized by `clip` consent grants (SYNTHESIS §8 slice 2). The file lives on
+ *  disk; this is the provenance record. */
+export interface RenderedClip {
+  id: string;
+  workspaceId: string;
+  sourceId: string;
+  momentId: string | null;
+  utteranceIds: string[];
+  speakers: string[]; // distinct on-screen speakers (consent subjects)
+  consentGrantIds: string[]; // the grants that authorized this render
+  format: ClipFormat;
+  channel: string;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  filename: string;
+  filePath: string;
+  mime: string;
+  size: number;
+  createdAt: string;
+}
+
 export type IdeaOrigin = 'cluster' | 'brainstorm';
 export type IdeaStatus = 'open' | 'promoted' | 'dismissed';
 

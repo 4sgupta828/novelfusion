@@ -12,6 +12,7 @@ import type {
   ConsentGrant,
   ConsentScope,
   ConsentDecision,
+  RenderedClip,
   TalkProposal,
   TalkKit,
   VoicePersona,
@@ -213,14 +214,23 @@ export interface SourceSummary {
   admitted: boolean;
   isVoice: boolean;
   segmentCount: number;
+  hasMedia: boolean; // an original recording is attached (source_blobs) — clippable
+  timestampedCount: number; // spoken segments with real timing — required to cut a clip
   createdAt: string;
+}
+
+/** Does a source exist in this workspace? (workspace-scoped existence check). */
+export function sourceExists(workspaceId: string, sourceId: string): boolean {
+  return !!getDb().prepare('SELECT 1 FROM sources WHERE workspace_id = ? AND id = ?').get(workspaceId, sourceId);
 }
 
 export function listSources(workspaceId: string): SourceSummary[] {
   const rows = getDb()
     .prepare(
       `SELECT s.id, s.kind, s.title, s.uri, s.consent_basis, s.admitted, s.is_voice, s.created_at,
-              (SELECT COUNT(*) FROM utterances u WHERE u.source_id = s.id) AS seg_count
+              (SELECT COUNT(*) FROM utterances u WHERE u.source_id = s.id) AS seg_count,
+              (SELECT COUNT(*) FROM utterances u WHERE u.source_id = s.id AND u.t_start_sec IS NOT NULL) AS ts_count,
+              EXISTS(SELECT 1 FROM source_blobs b WHERE b.source_id = s.id) AS has_media
        FROM sources s WHERE s.workspace_id = ? ORDER BY s.created_at DESC`,
     )
     .all(workspaceId) as Record<string, unknown>[];
@@ -233,6 +243,8 @@ export function listSources(workspaceId: string): SourceSummary[] {
     admitted: (r.admitted as number) === 1,
     isVoice: (r.is_voice as number) === 1,
     segmentCount: r.seg_count as number,
+    hasMedia: (r.has_media as number) === 1,
+    timestampedCount: (r.ts_count as number) ?? 0,
     createdAt: r.created_at as string,
   }));
 }
@@ -700,6 +712,58 @@ export function revokeConsentGrant(workspaceId: string, id: string): void {
  *  and fail-closed (code owns consent, Rule 18 exemption). Callers block an asset when covered:false. */
 export function consentGate(workspaceId: string, req: { subjectLabel: string; scope: ConsentScope; channel: string }): ConsentDecision {
   return decideConsent(activeGrantsForSubject(workspaceId, req.subjectLabel), { scope: req.scope, channel: req.channel });
+}
+
+// ---------- clip renders (real-footage clips) ----------
+
+function rowToRenderedClip(r: Record<string, unknown>): RenderedClip {
+  return {
+    id: r.id as string,
+    workspaceId: r.workspace_id as string,
+    sourceId: r.source_id as string,
+    momentId: (r.moment_id as string) ?? null,
+    utteranceIds: JSON.parse((r.utterance_ids as string) ?? '[]'),
+    speakers: JSON.parse((r.speakers as string) ?? '[]'),
+    consentGrantIds: JSON.parse((r.consent_grant_ids as string) ?? '[]'),
+    format: r.format as RenderedClip['format'],
+    channel: (r.channel as string) ?? 'all',
+    startSec: r.start_sec as number,
+    endSec: r.end_sec as number,
+    durationSec: r.duration_sec as number,
+    filename: r.filename as string,
+    filePath: r.file_path as string,
+    mime: (r.mime as string) ?? 'video/mp4',
+    size: (r.size as number) ?? 0,
+    createdAt: r.created_at as string,
+  };
+}
+
+export function insertRenderedClip(c: Omit<RenderedClip, 'id' | 'createdAt'>): RenderedClip {
+  const id = newId('clip');
+  getDb()
+    .prepare(
+      `INSERT INTO clip_renders (id, workspace_id, source_id, moment_id, utterance_ids, speakers, consent_grant_ids, format, channel, start_sec, end_sec, duration_sec, filename, file_path, mime, size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id, c.workspaceId, c.sourceId, c.momentId,
+      JSON.stringify(c.utteranceIds), JSON.stringify(c.speakers), JSON.stringify(c.consentGrantIds),
+      c.format, c.channel, c.startSec, c.endSec, c.durationSec, c.filename, c.filePath, c.mime, c.size,
+    );
+  return getRenderedClip(c.workspaceId, id)!;
+}
+
+export function getRenderedClip(workspaceId: string, id: string): RenderedClip | null {
+  const r = getDb().prepare('SELECT * FROM clip_renders WHERE workspace_id = ? AND id = ?').get(workspaceId, id) as Record<string, unknown> | undefined;
+  return r ? rowToRenderedClip(r) : null;
+}
+
+export function listRenderedClips(workspaceId: string): RenderedClip[] {
+  return (getDb().prepare('SELECT * FROM clip_renders WHERE workspace_id = ? ORDER BY created_at DESC').all(workspaceId) as Record<string, unknown>[]).map(rowToRenderedClip);
+}
+
+export function deleteRenderedClip(workspaceId: string, id: string): void {
+  getDb().prepare('DELETE FROM clip_renders WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
 }
 
 // ---------- ideas (scratch space upstream of the slate) ----------

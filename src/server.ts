@@ -6,6 +6,7 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import {
@@ -34,6 +35,10 @@ import {
   insertConsentGrant,
   revokeConsentGrant,
   consentGate,
+  sourceExists,
+  listRenderedClips,
+  getRenderedClip,
+  deleteRenderedClip,
   getCollaborator,
   deleteCollaborator,
   listUtterances,
@@ -56,6 +61,7 @@ import {
 } from './db/index.js';
 import { generateIdeaClusters, brainstormIdeas, promoteIdeaToMoment } from './pipeline/ideas.js';
 import { proposeTalks, planTalk, dismissTalk, reopenTalk, developTalk, talkKit } from './pipeline/talks.js';
+import { renderClip, clipFileAbsPath, ClipError } from './pipeline/clips.js';
 import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
 import { discoverSources } from './pipeline/discover.js';
 import { sweepFootprint } from './pipeline/footprint.js';
@@ -167,7 +173,7 @@ app.get('/api/templates', wrap((_req, res) => {
 
 // Client-visible feature flags (drives conditional UI: Query box, download affordance).
 app.get('/api/config', wrap((_req, res) => {
-  res.json({ flags: { corpusQuery: config.flags.corpusQuery, retainOriginals: config.flags.retainOriginals, sourceDiscovery: config.flags.sourceDiscovery, talkKit: config.flags.talkKit } });
+  res.json({ flags: { corpusQuery: config.flags.corpusQuery, retainOriginals: config.flags.retainOriginals, sourceDiscovery: config.flags.sourceDiscovery, talkKit: config.flags.talkKit, clipRender: config.flags.clipRender } });
 }));
 
 // ---------- collaborators (named experts who author versions) ----------
@@ -566,6 +572,75 @@ app.post('/api/:ws/ingest-file', upload.array('files', 20), wrap(async (req, res
   }
   kickBackfill(ws); // eager background embed/index of the newly-admitted passages (no-op if retrieval off)
   res.json(results);
+}));
+
+// ---------- real-footage clip rendering (behind NF_FLAG_CLIP_RENDER) ----------
+
+const clipGate = (res: import('express').Response): boolean => {
+  if (!config.flags.clipRender) {
+    res.status(404).json({ error: 'clip rendering is disabled (flag NF_FLAG_CLIP_RENDER off)' });
+    return false;
+  }
+  return true;
+};
+
+// Attach the original recording (audio/video) to an existing source, so real clips can be cut from it.
+const mediaUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 400 * 1024 * 1024 } });
+app.post('/api/:ws/sources/:id/media', mediaUpload.single('file'), wrap((req, res) => {
+  if (!clipGate(res)) return;
+  const ws = param(req, 'ws');
+  const sourceId = param(req, 'id');
+  const f = req.file as Express.Multer.File | undefined;
+  if (!f) throw new Error('no file uploaded');
+  if (!sourceExists(ws, sourceId)) return void res.status(404).json({ error: 'source not found' });
+  const mime = f.mimetype || 'application/octet-stream';
+  if (!/^(audio|video)\//.test(mime)) throw new Error(`attach an audio or video file (got ${mime})`);
+  insertSourceBlob({ sourceId, workspaceId: ws, filename: f.originalname, mime, size: f.size, bytes: f.buffer });
+  res.json({ ok: true, filename: f.originalname, mime, size: f.size });
+}));
+
+app.post('/api/:ws/clips/render', wrap(async (req, res) => {
+  if (!clipGate(res)) return;
+  const ws = param(req, 'ws');
+  const momentId = typeof req.body?.momentId === 'string' && req.body.momentId ? req.body.momentId : undefined;
+  const utteranceIds = Array.isArray(req.body?.utteranceIds) ? req.body.utteranceIds.map((x: unknown) => String(x)) : undefined;
+  const format = ['16:9', '9:16', '1:1'].includes(req.body?.format) ? req.body.format : '16:9';
+  const channel = typeof req.body?.channel === 'string' && req.body.channel ? req.body.channel : 'all';
+  try {
+    const clip = await renderClip(ws, { momentId, utteranceIds, format, channel });
+    res.json(clip);
+  } catch (e) {
+    if (e instanceof ClipError) return void res.status(422).json({ error: e.message, code: e.code, detail: e.detail });
+    throw e;
+  }
+}));
+
+app.get('/api/:ws/clips', wrap((req, res) => {
+  if (!clipGate(res)) return;
+  res.json(listRenderedClips(param(req, 'ws')));
+}));
+
+app.get('/api/:ws/clips/:id/file', wrap((req, res) => {
+  if (!clipGate(res)) return;
+  const ws = param(req, 'ws');
+  const clip = getRenderedClip(ws, param(req, 'id')); // workspace-scoped: no cross-tenant file access
+  if (!clip) return void res.status(404).json({ error: 'clip not found' });
+  const abs = clipFileAbsPath(clip);
+  if (!abs) return void res.status(410).json({ error: 'clip file no longer on disk' });
+  res.setHeader('Content-Type', clip.mime);
+  res.sendFile(abs);
+}));
+
+app.delete('/api/:ws/clips/:id', wrap((req, res) => {
+  if (!clipGate(res)) return;
+  const ws = param(req, 'ws');
+  const clip = getRenderedClip(ws, param(req, 'id'));
+  if (clip) {
+    const abs = clipFileAbsPath(clip);
+    if (abs) try { fs.unlinkSync(abs); } catch { /* file already gone */ }
+    deleteRenderedClip(ws, param(req, 'id'));
+  }
+  res.json({ ok: true });
 }));
 
 app.post('/api/:ws/ingest-url', wrap(async (req, res) => {

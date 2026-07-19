@@ -61,6 +61,33 @@ CREATE TABLE IF NOT EXISTS source_blobs (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Clip renders: REAL-footage clips cut from a source's retained recording (source_blobs) at a
+-- moment's timestamps — provenance-clean video (a real person verifiably saying the real thing, not
+-- synthetic; SYNTHESIS §8 slice 2). Rendering is BLOCKED by the consent gate unless every on-screen
+-- speaker has a covering `clip` grant (the first real consumer of the consent ledger). The output
+-- file lives on disk under data/renders/ (not in the DB); this row is the provenance record: which
+-- utterances, which speakers, which consent grants authorized it. Behind NF_FLAG_CLIP_RENDER.
+CREATE TABLE IF NOT EXISTS clip_renders (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  source_id TEXT NOT NULL REFERENCES sources(id),
+  moment_id TEXT,                          -- optional: the moment this clip was cut for
+  utterance_ids TEXT NOT NULL DEFAULT '[]',-- JSON: the utterances the clip covers (provenance)
+  speakers TEXT NOT NULL DEFAULT '[]',     -- JSON: distinct on-screen speakers (consent subjects)
+  consent_grant_ids TEXT NOT NULL DEFAULT '[]', -- JSON: the grants that authorized this render
+  format TEXT NOT NULL DEFAULT '16:9',     -- aspect: '16:9' | '9:16' | '1:1'
+  channel TEXT NOT NULL DEFAULT 'all',     -- intended distribution channel (for the consent check)
+  start_sec REAL NOT NULL,
+  end_sec REAL NOT NULL,
+  duration_sec REAL NOT NULL,
+  filename TEXT NOT NULL,                   -- output filename
+  file_path TEXT NOT NULL,                  -- path under data/renders (relative)
+  mime TEXT NOT NULL DEFAULT 'video/mp4',
+  size INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_clip_renders_ws ON clip_renders(workspace_id, created_at);
+
 -- Dense embeddings sidecar (retrieval flag). Kept OFF the hot SELECT u.* path.
 -- model/dim carried so the dense leg never cosines across two embedding spaces
 -- (the "dual embedding" landmine). workspace_id denormalized for the isolation filter.

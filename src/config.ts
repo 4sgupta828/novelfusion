@@ -34,5 +34,9 @@ export const config = {
     // `talk_kit` direction, docs/specs/talk-kit.md). Default OFF (Rule 20): when off, the Talks nav
     // view is hidden and its endpoints 404. Full long-form talk composition remains deferred.
     talkKit: flag('NF_FLAG_TALK_KIT'),
+    // Real-footage clip rendering: cut a provenance-clean clip from a source's retained recording at
+    // a moment's timestamps, gated on `clip` consent (SYNTHESIS §8 slice 2). Default OFF (Rule 20).
+    // New subprocess (ffmpeg) exec path — Rule 15 (execFile with array args, random temp paths).
+    clipRender: flag('NF_FLAG_CLIP_RENDER'),
   },
 };
