@@ -247,3 +247,73 @@ hold the line until the distillation gate clears. Design spec: `docs/specs/talk-
 - Ship `talk_kit` mode 1 (downstream repurposing) as the paid output; mode 2 (forward prep) as an
   unpaid onboarding hook only.
 - Validate webinar-prep willingness-to-pay in the Q5.2 interviews before treating prep as revenue.
+
+---
+
+## 8. Addendum (2026-07-19): video generation & the synthetic-presenter question
+
+**Trigger:** "investigate how ngram is built; can we add video gen (AI presenter/voice) for sales/
+training/ad/marketing?" The user decided they want synthetic AI-presenter video. Reviewed by a
+3-member adversarial panel (Codex GPT-5.5 + two code-grounded subagents; Gemini seat substituted,
+no-auth). **Unanimous RECONSIDER** — narrow hard, and build the foundation first.
+
+### 8.1 What ngram is (the teardown)
+An agentic "plan-before-render" orchestrator: input (docs/URLs/recordings) → script + approved
+storyboard → assemble scene visuals + motion graphics + captions + **AI voiceover** → multi-format
+export. The synthetic layer is **commodity provider calls** — ElevenLabs/MiniMax for voice + voice
+clones; avatars = pre-built, a "generated synthetic protagonist," custom faces from an uploaded
+image/clip, uploaded talking-head + lip-sync. ngram's moat is the planning + brand-assembly UX, **not
+the models** — anyone can wire up the same providers.
+
+### 8.2 The decision
+**Do NOT ship "governed synthetic video" as a broad category.** The generated-protagonist /
+marketing-copy-script / ads-first version stays killed (§2.2): self-defeating for an authenticity
+brand post–Article 50, drags us onto ngram/HeyGen's turf as a *worse* commodity orchestrator (they add
+a consent checkbox + AI label in a sprint), and touches the moat (§3 regression corpus) zero.
+"Generation is not the moat" (§3) — synthetic video is pure generation surface.
+
+**The one on-thesis exception — a consented likeness of a REAL person delivering THEIR OWN grounded
+words.** This is leverage on the §2.4 exec-attention constraint (a real attested performance, scaled)
+without a film crew — not a deepfake. Beachhead: **personalized sales video** (Tavus-style, per
+account) or training/enablement. **Not ads** (where the authenticity thesis is weakest). Generated
+protagonists and marketing-copy scripts remain killed.
+
+### 8.3 The blocker the panel surfaced (the reason we build the gate first)
+The whole "consented likeness, not a deepfake" pitch rests on a **consent ledger that isn't built.**
+Today consent is a 4-value enum on the *source* (`types.ts` consent bases: `public | recorded_consent
+| uploaded_owner | synced_pending_review`). There is **no `ConsentGrant` entity, no likeness/voice
+scope, and no person-level code-owned gate that can refuse to render an unconsented face/voice.** The
+PRD describes it (§7/§8); the build never reached it. Shipping synthetic on top of that is "the
+fireable-incident path." **You cannot sell "consented, not deepfake" until the code can refuse to
+render an unconsented one.**
+
+### 8.4 Architecture — BYO-renderer, decisively
+NovelFusion stays the governed brain: emit a grounded, consent-checked, **Article-50-labeled**
+storyboard/render manifest; an **external renderer** (HeyGen/ElevenLabs/Tavus/ngram) makes the pixels.
+Own-render pulls provider liability + a new external-network path (Rule 15) in-house, violates Phase-0
+discipline, and makes us the commodity. Provenance breaks at the render step: text grounding proves
+*words → utterance*; nothing binds a rendered *frame/voice* to a person-grant — hence the grant +
+render-provenance binding must exist first. Real footage keeps pixels = utterance.
+
+### 8.5 The sequenced build (adopted)
+1. **Consent-grant primitive + code-owned gate FIRST** — the moat piece, valuable even for real
+   footage. `ConsentGrant{subject, scopes: quote|clip|likeness|voice_clone, channels[],
+   survivesDeparture, evidence, grantedAt, revokedAt?}` + a deterministic `consentGate(ws,{subject,
+   scope,channel})` that blocks any asset whose likeness/voice lacks a covering grant (code-owned;
+   Rule 18 consent exemption). Ship the gate as a product.
+2. **Real-footage clip rendering** — render the existing `clip_spec` (cut the real timestamped moment,
+   caption, brand, export). On-thesis, no synthetic liability.
+3. **Consented-likeness clip (flagged, post-gate, BYO-renderer)** — the exec's own receipted words,
+   their consented + labeled AI likeness, external renderer, signed provenance/consent bundle.
+   `NF_FLAG_SYNTHETIC_VIDEO` default OFF; Rule 15 security note; render blocked until named-person
+   approval verifies the grant + the grounded script.
+
+### 8.6 Strict conditions for any synthetic frame (all mandatory)
+Real, named, currently-consenting subject · likeness + voice grant with a **departure clause** · script
+is a gated `developTalk` output (sourced points only voiced as fact) · Article-50 label baked into the
+manifest, not a UI toggle · no prebuilt generic avatars · BYO-renderer · flag default-OFF · strictly
+post-gate · export includes a signed provenance/consent bundle.
+
+**Positioning:** *"render-ready governed video plans: every line receipted, every likeness licensed,
+every synthetic frame labeled. The synthetic presenter is optional plumbing, not the product."* Full
+spec: `docs/specs/video.md`.
