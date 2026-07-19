@@ -175,3 +175,75 @@ slashes it → higher margin per client + capacity to take on more clients.
   corpus.
 - Validate the ROI story against Q5.2's willingness-to-pay interviews (efficiency + win-rate numbers,
   not pipeline-multiplication enthusiasm).
+
+---
+
+## 7. Addendum (2026-07-18): can we GENERATE talks/webinars? — the `talk_kit`
+
+**Trigger:** "Can we create webinars themselves, given company data + intent + structure?" Reviewed by
+a 3-member adversarial panel per the operating rules — **Codex (GPT-5.5)** headless + **two independent
+code-grounded subagents** (Gemini seat substituted, no-auth). Two returned ADOPT-WITH-CHANGES, one
+returned RECONSIDER; the dissent reshaped the conclusion.
+
+### 7.1 The answer: not a "webinar generator" — a `talk_kit`
+Today a webinar is an **input** (source; the graveyard wedge). The instinct to make it an **output**
+is sound *only* in a narrow shape. **Rejected: synthetic webinar** (AI script + AI avatar / cloned
+voice) — violates §2.2 + Article 50 + the whole provenance thesis. The legal line (a real human
+delivering generated text does not cross the avatar ban) is stable; the **real** danger is subtler —
+**"authorship laundering":** a whole-talk arc and framing presented as the exec's own POV without
+receipts (today's weave emits ungrounded connective prose and silently drops unresolvable
+provenance). And a full talk is the **worst artifact against §2.4's binding constraint** — it spends
+the exec's scarcest resource (a live delivery slot + a whole-talk approval object). That is
+multiplication, not leverage.
+
+**Adopted shape — a generic `talk_kit`** (webinar is one instance; also podcast/conference/sales
+kickoff), with two clearly separated modes:
+1. **Downstream repurposing pack (the paid product).** From a recording that ALREADY exists → posts,
+   clips, a sales-narrative one-pager, all receipted. Async, **zero new exec time**, *is* the
+   graveyard thesis, feeds the §6 credibility/sales money story.
+2. **Forward run-of-show prep (a FREE acquisition hook, not a paid output).** A provenance-backed
+   briefing that makes a real speaker sharper/faster/safer — positioned exactly like
+   retro-distillation (§3) and retro-resonance (§6.4): an onboarding demo, never a paid output, so
+   the product never centers on the exec-attention-multiplying artifact.
+
+**Positioning (adopted):** *"NovelFusion doesn't make webinars. It makes a real speaker sharper,
+faster, and safer — and turns the talk you're already giving into 10x receipted downstream assets.
+The prep is the free hook; the downstream assets are the product."*
+
+### 7.2 Why not center it on prep (the dissent, accepted)
+Webinar-*prep* is largely not a standalone buyer pain: companies that run webinars already own decks
+and a process; the CMO's pain is throughput and the agency's is source-gathering COGS (§3) — prep
+touches neither and *adds* an exec-review surface. The moat (§3 regression corpus) learns from
+**edits to drafts**, not run-of-shows, and "recording → new corpus" already exists via ingest — so a
+generated talk adds surface area (long-form hallucination, a whole talk to consent-gate), not
+defensibility. Hence prep = loss-leader hook; the durable money stays on the downstream/resonance
+assets that don't tax exec attention.
+
+### 7.3 Feasibility — a new composition contract, not a format enum
+Adding an `AssetFormat` member is trivial (`types.ts:10`) but insufficient. `weaveDraft` is
+**single-moment-anchored** — one `momentId`, ±4 same-source utterances (`weave.ts:233-253`;
+`Draft.momentId` is 1:1, `types.ts:161`). A talk spans many moments across many sources. Required
+before any build:
+- a **multi-moment / corpus-scoped composition contract** (retrieve across corpus → outline → per
+  segment) — `retrieval.ts` is a separate query surface, not wired into weave;
+- route long-form claims through the **retrieval grounding gates** (`grounding.ts` span/numeric/
+  faithfulness, fail-closed — `retrieval.ts:197-220`), NOT weave's weaker ID-filter (`weave.ts:314`);
+- an **attestation split** — `source-backed claims` vs `connective tissue` vs `speaker-owned words`
+  — plus a provenance-**density** floor, so scaffolding is never presented as the exec's authored POV;
+- slide figures/tables must pass the numeric + faithfulness gates, not just carry ids;
+- a **held-out coverage-collapse eval** (long-form's failure mode is dropped/thin coverage, since the
+  id-filter fails safe) — built before the feature, per Rule 4/16.
+Post→claim mapping stays **LLM-with-id-validation**, never substring (Rule 18).
+
+### 7.4 Sequencing
+**Strictly post-gate**, behind a flag (Rule 20, default OFF), excluded from the §4 gate metrics — the
+§6.3 "keep out of Phase 0" precedent applies identically. Real-footage assembly (scaled `clip_spec`,
+already timestamp-gated at `weave.ts:246`) is the lowest-risk first slice but feeds zero gate metrics;
+hold the line until the distillation gate clears. Design spec: `docs/specs/talk-kit.md`.
+
+### 7.5 Carried-forward actions
+- Build the **multi-moment composition contract** + wire retrieval→weave before any long-form format.
+- Reuse `grounding.ts` gates for long-form; add the coverage-collapse held-out eval first.
+- Ship `talk_kit` mode 1 (downstream repurposing) as the paid output; mode 2 (forward prep) as an
+  unpaid onboarding hook only.
+- Validate webinar-prep willingness-to-pay in the Q5.2 interviews before treating prep as revenue.
