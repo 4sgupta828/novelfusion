@@ -1517,8 +1517,34 @@ function talkCardHtml(talk, i) {
       ${talk.buildsOn?.length ? `<p class="talk-buildson">Builds on: ${talk.buildsOn.map((b) => `<span class="talk-tag">${esc(b)}</span>`).join(' ')}</p>` : ''}
       <div class="talk-actions">${actions}</div>
       ${state.serverFlags?.fusionVideo ? fusionBarHtml() : ''}
+      ${fusionVersionsHtml(talk._fusions || [])}
       <div class="talk-kit-slot" data-kit-for="${esc(talk.id)}"></div>
     </article>`;
+}
+
+/** The persisted, versioned fusion videos for a talk (v1 = first generated). Newest shown first. */
+function fusionVersionsHtml(fusions) {
+  if (!fusions.length) return '';
+  const rows = fusions
+    .map((v, i) => ({ v, ver: i + 1 }))
+    .reverse()
+    .map(({ v, ver }) => {
+      const url = `/api/${state.ws}/fusion/${v.id}/file`;
+      const date = (v.createdAt || '').slice(0, 16).replace('T', ' ');
+      const meta = [v.theme, v.format, v.voice, `${(v.durationSec || 0).toFixed(0)}s`].filter(Boolean).join(' · ');
+      const open = state._openFusion === v.id;
+      return `<div class="fusion-ver" data-id="${esc(v.id)}">
+        <div class="fusion-ver-head">
+          <button class="fusion-ver-play" aria-expanded="${open}">${open ? '▾' : '▸'} v${ver}</button>
+          <span class="fusion-ver-meta">${esc(meta)} · ${esc(date)}</span>
+          <a class="fusion-ver-dl" href="${url}" download="fusion-v${ver}-${v.format.replace(':', 'x')}.mp4" title="Download">↓</a>
+          <button class="fusion-ver-del" title="Delete this version">✕</button>
+        </div>
+        <div class="fusion-ver-slot">${open ? `<video class="fusion-video" src="${url}" controls autoplay preload="metadata"></video>` : ''}</div>
+      </div>`;
+    })
+    .join('');
+  return `<div class="fusion-versions"><div class="fusion-versions-label">Generated videos · ${fusions.length}</div>${rows}</div>`;
 }
 
 const TALK_FILTERS = ['open', 'planned', 'all'];
@@ -1527,9 +1553,13 @@ async function renderTalks(view, stale) {
   const filter = state.talkFilter && TALK_FILTERS.includes(state.talkFilter) ? state.talkFilter : 'open';
   const q = filter === 'all' ? '' : `?status=${filter}`;
   const talks = await api(`${state.ws}/talks${q}`);
+  // Load persisted fusion videos once and group by talk, oldest→newest for version numbering.
+  const fusions = state.serverFlags?.fusionVideo ? await api(`${state.ws}/fusion`).catch(() => []) : [];
   if (stale()) return;
   setBudget(0);
-  talks.forEach((t) => { t._byId = Object.fromEntries((t.utterances || []).map((u) => [u.id, u])); });
+  const fusByTalk = {};
+  [...fusions].reverse().forEach((v) => { (fusByTalk[v.originId] = fusByTalk[v.originId] || []).push(v); }); // reverse: listFusion is newest-first → now oldest-first
+  talks.forEach((t) => { t._byId = Object.fromEntries((t.utterances || []).map((u) => [u.id, u])); t._fusions = fusByTalk[t.id] || []; });
 
   const filterCtl = `<div class="talk-filter" role="group" aria-label="Filter talks">
     ${TALK_FILTERS.map((f) => `<button class="talk-filter-btn ${f === filter ? 'on' : ''}" data-filter="${f}">${f === 'all' ? 'All' : f[0].toUpperCase() + f.slice(1)}</button>`).join('')}
@@ -1595,14 +1625,28 @@ async function renderTalks(view, stale) {
         fslot.innerHTML = '<p class="fusion-working">Directing your fusion video — storyboard → infographics → voiceover → assembly. This takes a minute…</p>';
         try {
           const v = await api(`${state.ws}/fusion/render`, { method: 'POST', body });
-          const url = `/api/${state.ws}/fusion/${v.id}/file`;
-          fslot.innerHTML = `<video class="fusion-video" src="${url}" controls preload="metadata"></video>
-            <div class="fusion-meta">${v.scenes.length} scenes · ${v.durationSec.toFixed(0)}s · ${(v.size / 1e6).toFixed(1)}MB
-            <a class="secondary fusion-dl" href="${url}" download="fusion-${v.format.replace(':', 'x')}.mp4">↓ download</a></div>`;
-          toast('Fusion video ready.');
+          toast(`Fusion video saved (${(v.scenes || []).length} scenes · ${v.durationSec.toFixed(0)}s).`);
+          state._openFusion = v.id; // auto-expand the new version in the saved list after re-render
+          render();
         } catch (err) {
           fslot.innerHTML = `<span class="fusion-blocked">⚠ ${esc(err.message)}</span>`;
         }
+      });
+    });
+    // versioned saved videos: play toggle + delete
+    $$('.fusion-ver', card).forEach((row) => {
+      const id = row.dataset.id;
+      const slot = $('.fusion-ver-slot', row);
+      $('.fusion-ver-play', row)?.addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        const open = btn.getAttribute('aria-expanded') === 'true';
+        if (open) { slot.innerHTML = ''; btn.setAttribute('aria-expanded', 'false'); btn.textContent = btn.textContent.replace('▾', '▸'); if (state._openFusion === id) state._openFusion = null; }
+        else { slot.innerHTML = `<video class="fusion-video" src="/api/${state.ws}/fusion/${id}/file" controls autoplay preload="metadata"></video>`; btn.setAttribute('aria-expanded', 'true'); btn.textContent = btn.textContent.replace('▸', '▾'); }
+      });
+      $('.fusion-ver-del', row)?.addEventListener('click', async () => {
+        if (!confirm('Delete this generated video?')) return;
+        try { await api(`${state.ws}/fusion/${id}`, { method: 'DELETE' }); if (state._openFusion === id) state._openFusion = null; toast('Video deleted.'); render(); }
+        catch (err) { toast(err.message, true); }
       });
     });
 
