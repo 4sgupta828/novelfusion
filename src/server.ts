@@ -39,6 +39,9 @@ import {
   listRenderedClips,
   getRenderedClip,
   deleteRenderedClip,
+  listFusionVideos,
+  getFusionVideo,
+  deleteFusionVideo,
   getCollaborator,
   deleteCollaborator,
   listUtterances,
@@ -62,6 +65,7 @@ import {
 import { generateIdeaClusters, brainstormIdeas, promoteIdeaToMoment } from './pipeline/ideas.js';
 import { proposeTalks, planTalk, dismissTalk, reopenTalk, developTalk, talkKit } from './pipeline/talks.js';
 import { renderClip, clipFileAbsPath, ClipError } from './pipeline/clips.js';
+import { renderFusionVideo, fusionFileAbsPath, FusionError } from './pipeline/fusion.js';
 import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
 import { discoverSources } from './pipeline/discover.js';
 import { sweepFootprint } from './pipeline/footprint.js';
@@ -173,7 +177,7 @@ app.get('/api/templates', wrap((_req, res) => {
 
 // Client-visible feature flags (drives conditional UI: Query box, download affordance).
 app.get('/api/config', wrap((_req, res) => {
-  res.json({ flags: { corpusQuery: config.flags.corpusQuery, retainOriginals: config.flags.retainOriginals, sourceDiscovery: config.flags.sourceDiscovery, talkKit: config.flags.talkKit, clipRender: config.flags.clipRender } });
+  res.json({ flags: { corpusQuery: config.flags.corpusQuery, retainOriginals: config.flags.retainOriginals, sourceDiscovery: config.flags.sourceDiscovery, talkKit: config.flags.talkKit, clipRender: config.flags.clipRender, fusionVideo: config.flags.fusionVideo } });
 }));
 
 // ---------- collaborators (named experts who author versions) ----------
@@ -639,6 +643,61 @@ app.delete('/api/:ws/clips/:id', wrap((req, res) => {
     const abs = clipFileAbsPath(clip);
     if (abs) try { fs.unlinkSync(abs); } catch { /* file already gone */ }
     deleteRenderedClip(ws, param(req, 'id'));
+  }
+  res.json({ ok: true });
+}));
+
+// ---------- fusion videos (EXPERIMENTAL ngram-style generator; behind NF_FLAG_FUSION_VIDEO) ----------
+
+const fusionGate = (res: import('express').Response): boolean => {
+  if (!config.flags.fusionVideo) {
+    res.status(404).json({ error: 'fusion video is disabled (flag NF_FLAG_FUSION_VIDEO off)' });
+    return false;
+  }
+  return true;
+};
+
+app.get('/api/:ws/fusion', wrap((req, res) => {
+  if (!fusionGate(res)) return;
+  res.json(listFusionVideos(param(req, 'ws')));
+}));
+
+app.post('/api/:ws/fusion/render', wrap(async (req, res) => {
+  if (!fusionGate(res)) return;
+  const ws = param(req, 'ws');
+  const talkId = typeof req.body?.talkId === 'string' && req.body.talkId ? req.body.talkId : undefined;
+  const momentId = typeof req.body?.momentId === 'string' && req.body.momentId ? req.body.momentId : undefined;
+  const sourceId = typeof req.body?.sourceId === 'string' && req.body.sourceId ? req.body.sourceId : undefined;
+  const voice = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].includes(req.body?.voice) ? req.body.voice : undefined;
+  const format = ['16:9', '9:16', '1:1'].includes(req.body?.format) ? req.body.format : undefined;
+  try {
+    const video = await renderFusionVideo(ws, { talkId, momentId, sourceId, voice, format });
+    res.json(video);
+  } catch (e) {
+    if (e instanceof FusionError) return void res.status(422).json({ error: e.message, code: e.code });
+    throw e;
+  }
+}));
+
+app.get('/api/:ws/fusion/:id/file', wrap((req, res) => {
+  if (!fusionGate(res)) return;
+  const ws = param(req, 'ws');
+  const v = getFusionVideo(ws, param(req, 'id')); // workspace-scoped
+  if (!v) return void res.status(404).json({ error: 'fusion video not found' });
+  const abs = fusionFileAbsPath(v);
+  if (!abs) return void res.status(410).json({ error: 'fusion video file no longer on disk' });
+  res.setHeader('Content-Type', v.mime);
+  res.sendFile(abs);
+}));
+
+app.delete('/api/:ws/fusion/:id', wrap((req, res) => {
+  if (!fusionGate(res)) return;
+  const ws = param(req, 'ws');
+  const v = getFusionVideo(ws, param(req, 'id'));
+  if (v) {
+    const abs = fusionFileAbsPath(v);
+    if (abs) try { fs.unlinkSync(abs); } catch { /* file already gone */ }
+    deleteFusionVideo(ws, param(req, 'id'));
   }
   res.json({ ok: true });
 }));

@@ -38,5 +38,9 @@ export const config = {
     // a moment's timestamps, gated on `clip` consent (SYNTHESIS §8 slice 2). Default OFF (Rule 20).
     // New subprocess (ffmpeg) exec path — Rule 15 (execFile with array args, random temp paths).
     clipRender: flag('NF_FLAG_CLIP_RENDER'),
+    // EXPERIMENTAL fusion-video generator (ngram-style): transcript/talk → storyboard → canvas
+    // infographics + OpenAI TTS voiceover → ffmpeg-assembled video. Default OFF (Rule 20). Synthetic
+    // by design (not the provenance-clean path) — kept explicitly experimental. Needs OPENAI_API_KEY.
+    fusionVideo: flag('NF_FLAG_FUSION_VIDEO'),
   },
 };

@@ -600,7 +600,8 @@ const HELP = {
     body: `<p><strong>The Talk Slate proposes long-form talks your corpus can actually support.</strong> Where Ideas surfaces post-sized angles, this steps up to whole talks — webinars, workshops, conference sessions, podcasts, sales sessions, internal training. The AI reads across your corpus, looks at what you've <em>already delivered</em>, and proposes fresh talks you could give — each tied to a concrete <em>goal</em> (train, educate, enable sales, drive demand, establish authority, recruit, deep-dive) and a positive <em>outcome</em> for the company.</p>
       <p><strong>Everything is grounded and honest.</strong> Each proposal ships a segment <em>outline</em> where every segment carries the receipts it rests on, plus two scores: <em>feasibility</em> (does the corpus really have the material for a whole talk?) and <em>novelty</em> (is this new, or a re-run of something you've already done?). Thin support means a low feasibility score, not an invented arc.</p>
       <p><strong>Curate, then develop:</strong> hit <em>Propose talks</em> (optionally focused on a goal), then <em>Plan</em> the ones worth developing or <em>Dismiss</em> the rest — planned talks live under the <em>Planned</em> filter. On a planned talk, <em>Develop run-of-show</em> expands the outline into grounded talking points.</p>
-      <p><strong>The run-of-show is honest by construction.</strong> Every talking point is labeled: <span class="zone-sourced">■</span> <em>sourced</em> (a factual claim that passed the grounding gates — carries receipts), <span class="zone-connective">■</span> <em>framing</em> (a transition, never presented as fact), or <span class="zone-speaker">■</span> <em>your words</em> (a prompt for you to fill from your own experience). Each segment shows a coverage badge; where the corpus can't support a segment, you get a labeled <em>gap</em> — never an invented claim.</p>`,
+      <p><strong>The run-of-show is honest by construction.</strong> Every talking point is labeled: <span class="zone-sourced">■</span> <em>sourced</em> (a factual claim that passed the grounding gates — carries receipts), <span class="zone-connective">■</span> <em>framing</em> (a transition, never presented as fact), or <span class="zone-speaker">■</span> <em>your words</em> (a prompt for you to fill from your own experience). Each segment shows a coverage badge; where the corpus can't support a segment, you get a labeled <em>gap</em> — never an invented claim.</p>
+      <p><strong>🎬 Fusion video (experimental).</strong> Turn a talk into a short narrated explainer — the system writes a storyboard, renders infographic scenes, generates an AI voiceover, and assembles them into a video. This is the creative/experimental path (synthetic voice + generated visuals), separate from the provenance-clean real-footage clips. Pick a voice and aspect, then generate.</p>`,
   },
   ideas: {
     title: 'How Ideas works',
@@ -1489,6 +1490,12 @@ function talkCardHtml(talk, i) {
       <details class="talk-outline"><summary>${talk.outline.length} segments · outline</summary><ol class="talk-segs">${segs}</ol></details>
       ${talk.buildsOn?.length ? `<p class="talk-buildson">Builds on: ${talk.buildsOn.map((b) => `<span class="talk-tag">${esc(b)}</span>`).join(' ')}</p>` : ''}
       <div class="talk-actions">${actions}</div>
+      ${state.serverFlags?.fusionVideo ? `<div class="fusion-bar">
+        <button class="secondary act-fusion" title="Generate an experimental fusion video — storyboard + infographics + AI voiceover">🎬 Fusion video</button>
+        <select class="fusion-voice" title="Voiceover" aria-label="Voice">${['alloy', 'nova', 'onyx', 'shimmer', 'fable', 'echo'].map((v) => `<option value="${v}">${v}</option>`).join('')}</select>
+        <select class="fusion-format" title="Aspect" aria-label="Aspect">${['16:9', '9:16', '1:1'].map((f) => `<option value="${f}">${f}</option>`).join('')}</select>
+        <div class="fusion-slot"></div>
+      </div>` : ''}
       <div class="talk-kit-slot" data-kit-for="${esc(talk.id)}"></div>
     </article>`;
 }
@@ -1551,6 +1558,24 @@ async function renderTalks(view, stale) {
         toast(`Run-of-show ready — ${kit.grounding?.sourced ?? 0} sourced claims.`);
         e.target.textContent = 'Regenerate run-of-show';
       }));
+    $('.act-fusion', card)?.addEventListener('click', (e) => {
+      const fslot = $('.fusion-slot', card);
+      const voice = $('.fusion-voice', card)?.value || 'alloy';
+      const format = $('.fusion-format', card)?.value || '16:9';
+      busy(e.target, async () => {
+        fslot.innerHTML = '<p class="fusion-working">Directing your fusion video — storyboard → infographics → voiceover → assembly. This takes a minute…</p>';
+        try {
+          const v = await api(`${state.ws}/fusion/render`, { method: 'POST', body: { talkId: talk.id, voice, format } });
+          const url = `/api/${state.ws}/fusion/${v.id}/file`;
+          fslot.innerHTML = `<video class="fusion-video" src="${url}" controls preload="metadata"></video>
+            <div class="fusion-meta">${v.scenes.length} scenes · ${v.durationSec.toFixed(0)}s · ${(v.size / 1e6).toFixed(1)}MB
+            <a class="secondary fusion-dl" href="${url}" download="fusion-${v.format.replace(':', 'x')}.mp4">↓ download</a></div>`;
+          toast('Fusion video ready.');
+        } catch (err) {
+          fslot.innerHTML = `<span class="fusion-blocked">⚠ ${esc(err.message)}</span>`;
+        }
+      });
+    });
 
     // Lazily show an already-developed kit (planned/dismissed cards) without regenerating.
     if (talk.status !== 'open') {

@@ -13,6 +13,7 @@ import type {
   ConsentScope,
   ConsentDecision,
   RenderedClip,
+  FusionVideo,
   TalkProposal,
   TalkKit,
   VoicePersona,
@@ -764,6 +765,51 @@ export function listRenderedClips(workspaceId: string): RenderedClip[] {
 
 export function deleteRenderedClip(workspaceId: string, id: string): void {
   getDb().prepare('DELETE FROM clip_renders WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
+}
+
+// ---------- fusion videos (EXPERIMENTAL ngram-style generator) ----------
+
+function rowToFusionVideo(r: Record<string, unknown>): FusionVideo {
+  return {
+    id: r.id as string,
+    workspaceId: r.workspace_id as string,
+    title: r.title as string,
+    origin: (r.origin as string) ?? 'talk',
+    originId: (r.origin_id as string) ?? null,
+    voice: (r.voice as string) ?? 'alloy',
+    format: r.format as FusionVideo['format'],
+    scenes: JSON.parse((r.scenes as string) ?? '[]'),
+    durationSec: (r.duration_sec as number) ?? 0,
+    filename: r.filename as string,
+    filePath: r.file_path as string,
+    mime: (r.mime as string) ?? 'video/mp4',
+    size: (r.size as number) ?? 0,
+    createdAt: r.created_at as string,
+  };
+}
+
+export function insertFusionVideo(v: Omit<FusionVideo, 'id' | 'createdAt'>): FusionVideo {
+  const id = newId('fusion');
+  getDb()
+    .prepare(
+      `INSERT INTO fusion_videos (id, workspace_id, title, origin, origin_id, voice, format, scenes, duration_sec, filename, file_path, mime, size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(id, v.workspaceId, v.title, v.origin, v.originId, v.voice, v.format, JSON.stringify(v.scenes), v.durationSec, v.filename, v.filePath, v.mime, v.size);
+  return getFusionVideo(v.workspaceId, id)!;
+}
+
+export function getFusionVideo(workspaceId: string, id: string): FusionVideo | null {
+  const r = getDb().prepare('SELECT * FROM fusion_videos WHERE workspace_id = ? AND id = ?').get(workspaceId, id) as Record<string, unknown> | undefined;
+  return r ? rowToFusionVideo(r) : null;
+}
+
+export function listFusionVideos(workspaceId: string): FusionVideo[] {
+  return (getDb().prepare('SELECT * FROM fusion_videos WHERE workspace_id = ? ORDER BY created_at DESC').all(workspaceId) as Record<string, unknown>[]).map(rowToFusionVideo);
+}
+
+export function deleteFusionVideo(workspaceId: string, id: string): void {
+  getDb().prepare('DELETE FROM fusion_videos WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
 }
 
 // ---------- ideas (scratch space upstream of the slate) ----------

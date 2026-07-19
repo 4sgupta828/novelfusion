@@ -241,6 +241,39 @@ export interface RenderedClip {
   createdAt: string;
 }
 
+export type SceneVisual = 'title' | 'bullets' | 'stat' | 'quote' | 'chart';
+
+/** One scene of a fusion-video storyboard: what the voiceover says + what shows on screen. */
+export interface StoryboardScene {
+  narration: string; // voiceover text (spoken)
+  visual: SceneVisual;
+  title: string; // on-screen headline
+  subtitle?: string;
+  bullets?: string[];
+  stat?: { value: string; label: string };
+  quote?: { text: string; attribution?: string };
+  chart?: { unit?: string; bars: { label: string; value: number }[] };
+}
+
+/** An EXPERIMENTAL generated fusion video (ngram-style): storyboard + canvas infographics + AI
+ *  voiceover, assembled with ffmpeg. Synthetic by design — not the provenance-clean clip path. */
+export interface FusionVideo {
+  id: string;
+  workspaceId: string;
+  title: string;
+  origin: string; // 'talk' | 'source' | 'moment'
+  originId: string | null;
+  voice: string;
+  format: ClipFormat;
+  scenes: StoryboardScene[];
+  durationSec: number;
+  filename: string;
+  filePath: string;
+  mime: string;
+  size: number;
+  createdAt: string;
+}
+
 export type IdeaOrigin = 'cluster' | 'brainstorm';
 export type IdeaStatus = 'open' | 'promoted' | 'dismissed';
 

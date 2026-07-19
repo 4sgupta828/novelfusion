@@ -88,6 +88,28 @@ CREATE TABLE IF NOT EXISTS clip_renders (
 );
 CREATE INDEX IF NOT EXISTS idx_clip_renders_ws ON clip_renders(workspace_id, created_at);
 
+-- Fusion videos: the EXPERIMENTAL ngram-style generator. A talk/transcript/moment → an LLM storyboard
+-- → per-scene canvas infographics + OpenAI TTS voiceover → an ffmpeg-assembled video. Synthetic by
+-- design (voiceover, generated visuals) — NOT the provenance-clean clip_renders path. The file lives
+-- on disk under data/fusion/; this row stores the storyboard + metadata. Behind NF_FLAG_FUSION_VIDEO.
+CREATE TABLE IF NOT EXISTS fusion_videos (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  title TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'talk',     -- 'talk' | 'source' | 'moment'
+  origin_id TEXT,
+  voice TEXT NOT NULL DEFAULT 'alloy',
+  format TEXT NOT NULL DEFAULT '16:9',
+  scenes TEXT NOT NULL DEFAULT '[]',       -- JSON StoryboardScene[]
+  duration_sec REAL NOT NULL DEFAULT 0,
+  filename TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  mime TEXT NOT NULL DEFAULT 'video/mp4',
+  size INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fusion_videos_ws ON fusion_videos(workspace_id, created_at);
+
 -- Dense embeddings sidecar (retrieval flag). Kept OFF the hot SELECT u.* path.
 -- model/dim carried so the dense leg never cosines across two embedding spaces
 -- (the "dual embedding" landmine). workspace_id denormalized for the isolation filter.
