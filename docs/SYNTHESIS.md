@@ -64,3 +64,114 @@ Six-week headless bench prototype of the distillation loop with one agency desig
 3. Blazel's actual video shipping status; whether the "internal mini-Blazel" enterprise play is real (no public evidence found).
 4. Employee likeness consent at departure — whose approvals survive when the quoted person quits (NY SB 7676B / NO FAKES contractual design).
 5. Post-Aug-2026 buyer appetite: will B2B marketers publish AI-labeled synthetic video at all, or does demand collapse to real-footage clips (we bet the latter)?
+
+---
+
+## 6. Addendum (2026-07-18): the resonance loop + the money story
+
+**Trigger:** re-study of Blazel's engagement→CRM→sales flywheel and the founder's broader "company
+leverages its own assets → engagement → feedback → flywheel of improvements" vision. Reviewed by a
+3-member adversarial panel per the operating rules — **Codex (GPT-5.5)** headless + **two independent
+code-grounded subagents** (the Gemini seat was substituted by an additional code-grounded reviewer;
+gemini-cli has no auth on this machine). All three returned **ADOPT-WITH-CHANGES**, unanimously.
+
+### 6.1 What Blazel's loop is, and why we don't copy it head-on
+Blazel closes on **the market's attention**: post → track who engages → match to ICP → enrich →
+push to CRM → reach-optimize. That loop is real but **copyable** (Common Room / Clay / Apollo already
+do engagement→enrich→CRM) and it rests on the fuzziest money claim (content→pipeline attribution).
+Fighting Blazel on the enrichment/CRM commodity also reopens the per-seat comparison §3 prices
+against. **PRD §3's "CRM lead-intelligence loop" non-goal stays in force.**
+
+### 6.2 The loop only we can run — "Claims That Land"
+Because every NovelFusion post traces to a **moment (utterance provenance) + the principles that
+fired**, the market's response is *admissible evidence*: we can attribute resonance back to a
+specific claim and editorial rule, not just a contact. The second loop:
+**post → market response → which of our provenance-verified beliefs the market rewards → a
+human-ratified update to the constitution/positioning.** Blazel makes the company louder; this makes
+it sharper and more credible, with receipts.
+
+**Positioning (adopted):** *"the claims that land — the only content system that proves which of
+your provenance-verified beliefs the market rewards, receipted end-to-end (utterance → post →
+engagement)."* Attribution to the **moment/principle** (first-party, defensible) vs. the **contact**
+(commodity). **Durability is anchored to the regression corpus/constitution substrate (§3), NOT to
+the loop** — the loop is a bolt-on Blazel can add; the ratified regression corpus is the asset it
+cannot ingest. Never pitch it as "positioning hygiene"; pitch the demand-side pain: *"which of our
+true ideas does the market reward, so we stop spending scarce exec posting-time on posts that flop."*
+
+### 6.3 Panel-mandated cuts and sequencing
+- **CUT — "audience replies become new moments."** Non-consenting repliers have no grant in the
+  consent model (`types.ts` consent bases: `public | recorded_consent | uploaded_owner |
+  synced_pending_review`). Replies may enter at most as **WEB/DOC-class supporting evidence,
+  quarantined** — never spoken moments in the company's voice.
+- **DEFER — the resonance→sales "graph"/CRM handoff.** It *is* the PRD §3 non-goal. Rename
+  "resonance **ledger**" until identity + consent basis are intentionally added post-MVP.
+- **GATE — resonance never auto-updates the constitution.** It is a **candidate-generator only**,
+  capped like `distill`, routed through the human `ratify` counterfactual gate. Otherwise a
+  resonance-optimizer against a positioning corpus *becomes* the opaque Typeface "Arc Loop" §1 names
+  as the anti-pattern. Reword the signal from "which beliefs drive pipeline" (underpowered at
+  3–5 posts/week) to **"which claims triggered useful objections / questions / reuse."**
+- **KEEP OUT OF PHASE 0.** The live loop needs a publish integration that doesn't exist and would
+  contaminate the pre-registered gate (§4). Post-gate V1 only.
+
+### 6.4 The one thing to pull FORWARD (gate-safe near-term wedge)
+**Retro-resonance in the retro-distillation onboarding (§3).** A design partner's existing published
+posts already carry months of engagement history — feed that as a **retro signal** into the
+onboarding audit. It is **gate-safe** (an onboarding artifact, not a live optimizer), **consent-clean**
+(their own posts + aggregate counts), **statistically powered** (hundreds of posts, not 3–5/week), and
+it strengthens the "webinar graveyard" audit deck: *"…and here are the 3 themes your audience already
+rewarded, under-served last quarter, with receipts on both ends."* Ship behind a flag (Rule 20),
+excluded from gate metrics, presented as a hypothesis-generator for the human ratify gate (retro
+engagement is confounded by audience growth/algorithm/timing — never an auto-ranker).
+
+### 6.5 Data contract required before any live loop (feasibility, panel-verified)
+The engagement→**moment** link is clean and Rule-18-safe today (`drafts.moment_id` →
+`moments.utterance_ids` → utterances, a pure structural join). Missing:
+- `publish_records` + `engagement_snapshots` tables (today `PublishRecord`/`engagementSnapshots` live
+  only in the PRD data model, not `schema.sql`).
+- **Per-draft principle firings** — schema stores only aggregate `fire_count`/`override_count`; the
+  PRD's `Draft.principleFirings` was never schematized. Without it, engagement→**principle** is not
+  computable.
+- Post→claim mapping must be **LLM-with-id-validation** (the `ideas.ts` fabricated-id-drop pattern),
+  **never substring/keyword matching** (Rule 18).
+
+### 6.6 How the customer makes more money (the ROI story)
+A company makes money from content in exactly four ways; NovelFusion wins on the three Blazel
+under-serves and treats pipeline as compounding upside, not the headline claim. **Lead with
+efficiency + credibility (provable today); close with pipeline (compounds). Never claim "Nx
+pipeline."** (Consistent with §2.4: claim *leverage*, not multiplication.)
+
+1. **Spend less to produce it (efficiency — strongest, most measurable).** The customer already paid
+   for the webinars/podcasts/calls; they rot in the "graveyard." NovelFusion turns that sunk cost
+   into finished, receipted assets without consuming scarce exec time (the real bottleneck). Displaces
+   a $3–8K/mo ghostwriter/agency retainer at a fraction of the price.
+2. **Win more of the deals you already have (credibility — underrated).** Even pre-CRM, the resonance
+   *ledger* lets sales open with *"this account engaged with your take on X — here's the exact thing
+   your CEO said, and the follow-up that landed."* Higher win-rate on existing pipeline, zero extra
+   ad spend. In an AI-slop market, **provable ("everything traces to a real person") shortens sales
+   cycles** — pulling deals into this quarter is cash now.
+3. **Avoid the expensive blowup (cost avoidance).** Consent + provenance gating is insurance against a
+   misquote, an off-brand exec post, or an unbackable AI claim — real liabilities post-Article 50 /
+   NO FAKES.
+4. **Get more deals in the door (pipeline — the upside, over time).** As "Claims That Land" learns
+   which real ideas the market rewards, scarce exec posting-time stops going to posts that flop →
+   more effective inbound. Compounds; not the day-one pitch.
+
+**Sharpest ROI pitch (adopted):** *"You're already sitting on the raw material. NovelFusion turns
+recordings you've already paid for into a steady stream of credible, provable content — for less than
+a junior ghostwriter — that helps sales close faster and keeps you out of legal trouble. Over time it
+learns which of your ideas actually win business."*
+
+**Example P&L (one exec voice, mid-market B2B):** ~$1,000/mo NovelFusion vs a ~$5,000/mo agency →
+~$4K/mo saved or redirected to more voices; 3–4× publishable output from existing recordings; one
+extra $30K-ACV deal won per quarter (via resonance handoffs) pays the year several times over.
+
+**Agency channel (§3) money story is cleaner still:** source-gathering is their COGS; NovelFusion
+slashes it → higher margin per client + capacity to take on more clients.
+
+### 6.7 Carried-forward actions
+- Build **retro-resonance onboarding** (flagged, gate-excluded) as the near-term wedge feature.
+- Schematize the **per-draft principle-firing** contract before any live engagement loop.
+- Add **consent quarantine** for audience replies (WEB/DOC evidence class only) before they touch the
+  corpus.
+- Validate the ROI story against Q5.2's willingness-to-pay interviews (efficiency + win-rate numbers,
+  not pipeline-multiplication enthusiasm).
