@@ -148,6 +148,25 @@ CREATE TABLE IF NOT EXISTS talk_proposals (
 );
 CREATE INDEX IF NOT EXISTS idx_talk_proposals_ws ON talk_proposals(workspace_id, status);
 
+-- Talk kits: a DEVELOPED run-of-show for a planned talk proposal. Each outline segment is expanded
+-- into talking points, but honestly: every point carries an ATTESTATION ZONE — 'sourced' (a grounded
+-- claim, gated through grounding.ts span+numeric+faithfulness like the Query pipeline; carries
+-- receipts), 'connective' (transitions/framing — labeled non-attributable scaffold, never the exec's
+-- implied POV), or 'speaker_owned' (a blank the presenter fills). Per-segment coverage (full/partial/
+-- thin) is computed from provenance density — a segment the corpus can't support becomes a labeled
+-- GAP, never confabulated (the panel's coverage-collapse failure mode). One current kit per talk
+-- (regenerate replaces). Behind NF_FLAG_TALK_KIT.
+CREATE TABLE IF NOT EXISTS talk_kits (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  talk_id TEXT NOT NULL REFERENCES talk_proposals(id),
+  title TEXT NOT NULL,
+  segments TEXT NOT NULL DEFAULT '[]',   -- JSON DevelopedSegment[] (points w/ zones, coverage, gapNote)
+  grounding TEXT NOT NULL DEFAULT '{}',  -- JSON summary: {sourced, dropped, faithfulnessApplied}
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_talk_kits_ws ON talk_kits(workspace_id, talk_id);
+
 CREATE TABLE IF NOT EXISTS drafts (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),

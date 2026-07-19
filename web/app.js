@@ -593,7 +593,8 @@ const HELP = {
     title: 'How the Talk Slate works',
     body: `<p><strong>The Talk Slate proposes long-form talks your corpus can actually support.</strong> Where Ideas surfaces post-sized angles, this steps up to whole talks — webinars, workshops, conference sessions, podcasts, sales sessions, internal training. The AI reads across your corpus, looks at what you've <em>already delivered</em>, and proposes fresh talks you could give — each tied to a concrete <em>goal</em> (train, educate, enable sales, drive demand, establish authority, recruit, deep-dive) and a positive <em>outcome</em> for the company.</p>
       <p><strong>Everything is grounded and honest.</strong> Each proposal ships a segment <em>outline</em> where every segment carries the receipts it rests on, plus two scores: <em>feasibility</em> (does the corpus really have the material for a whole talk?) and <em>novelty</em> (is this new, or a re-run of something you've already done?). Thin support means a low feasibility score, not an invented arc.</p>
-      <p><strong>Curate the slate:</strong> hit <em>Propose talks</em> (optionally focused on a goal), then <em>Plan</em> the ones worth developing or <em>Dismiss</em> the rest. This is the discovery layer — proposals, not finished talks. Turning a planned talk into a full run-of-show is a later step.</p>`,
+      <p><strong>Curate, then develop:</strong> hit <em>Propose talks</em> (optionally focused on a goal), then <em>Plan</em> the ones worth developing or <em>Dismiss</em> the rest — planned talks live under the <em>Planned</em> filter. On a planned talk, <em>Develop run-of-show</em> expands the outline into grounded talking points.</p>
+      <p><strong>The run-of-show is honest by construction.</strong> Every talking point is labeled: <span class="zone-sourced">■</span> <em>sourced</em> (a factual claim that passed the grounding gates — carries receipts), <span class="zone-connective">■</span> <em>framing</em> (a transition, never presented as fact), or <span class="zone-speaker">■</span> <em>your words</em> (a prompt for you to fill from your own experience). Each segment shows a coverage badge; where the corpus can't support a segment, you get a labeled <em>gap</em> — never an invented claim.</p>`,
   },
   ideas: {
     title: 'How Ideas works',
@@ -1381,15 +1382,63 @@ const GOAL_LABEL = {
 const goalLabel = (g) => GOAL_LABEL[g] || (g || '').replace(/_/g, ' ');
 const GOAL_OPTIONS = ['training', 'education', 'sales_enablement', 'demand_gen', 'thought_leadership', 'community', 'recruiting', 'deep_dive', 'product_launch'];
 
+const ZONE_META = {
+  sourced: { cls: 'zone-sourced', tag: '' },
+  connective: { cls: 'zone-connective', tag: 'framing' },
+  speaker_owned: { cls: 'zone-speaker', tag: 'your words' },
+};
+const COVERAGE_META = {
+  full: { cls: 'cov-full', label: 'well-sourced' },
+  partial: { cls: 'cov-partial', label: 'partly sourced' },
+  thin: { cls: 'cov-thin', label: 'gap — speak from experience' },
+};
+
+/** Render a developed run-of-show (talk_kit) with attestation zones + per-segment coverage. */
+function talkKitHtml(kit) {
+  const byId = Object.fromEntries((kit.utterances || []).map((u) => [u.id, u]));
+  const g = kit.grounding || {};
+  const segs = (kit.segments || []).map((s) => {
+    const cov = COVERAGE_META[s.coverage] || COVERAGE_META.thin;
+    const points = (s.points || []).map((p) => {
+      const z = ZONE_META[p.zone] || ZONE_META.connective;
+      const chips = p.zone === 'sourced' ? (p.utteranceIds || []).map((id) => byId[id]).filter(Boolean).map(chipHtml).join('') : '';
+      return `<li class="ros-point ${z.cls}">
+        <span class="ros-point-text">${esc(p.text)}</span>
+        ${z.tag ? `<span class="ros-zone">${z.tag}</span>` : ''}
+        ${chips ? `<div class="chip-row ros-chips">${chips}</div>` : ''}
+      </li>`;
+    }).join('');
+    return `<section class="ros-seg">
+      <div class="ros-seg-head"><h4 class="ros-seg-title">${esc(s.title)}</h4><span class="ros-cov ${cov.cls}">${cov.label}</span></div>
+      ${s.gapNote ? `<p class="ros-gap">${esc(s.gapNote)}</p>` : ''}
+      <ol class="ros-points">${points}</ol>
+      ${s.speakerNotes ? `<p class="ros-notes"><span class="ros-notes-label">Speaker notes</span> ${esc(s.speakerNotes)}</p>` : ''}
+    </section>`;
+  }).join('');
+  return `<div class="ros">
+    <div class="ros-summary">Run-of-show · <strong>${g.sourced ?? 0}</strong> sourced claims${g.dropped ? ` · ${g.dropped} ungrounded dropped` : ''} · faithfulness judge ${g.faithfulnessApplied ? 'on' : 'off'}
+      <span class="ros-legend"><span class="zone-sourced">■</span> sourced <span class="zone-connective">■</span> framing <span class="zone-speaker">■</span> your words</span>
+    </div>
+    ${segs}
+  </div>`;
+}
+
 function talkCardHtml(talk, i) {
   const segs = (talk.outline || []).map((s) => {
     const chips = (s.utteranceIds || []).map((id) => talk._byId[id]).filter(Boolean).map(chipHtml).join('');
     return `<li class="talk-seg"><span class="talk-seg-title">${esc(s.title)}</span>${s.summary ? `<span class="talk-seg-sum">${esc(s.summary)}</span>` : ''}${chips ? `<div class="chip-row talk-seg-chips">${chips}</div>` : ''}</li>`;
   }).join('');
+  const st = talk.status;
+  const actions = st === 'open'
+    ? `<button class="primary talk-plan">Plan this</button><button class="ghost talk-dismiss">Dismiss</button>`
+    : st === 'planned'
+    ? `<button class="primary talk-develop">Develop run-of-show</button><button class="secondary talk-reopen">Un-plan</button><button class="ghost talk-dismiss">Dismiss</button>`
+    : `<button class="secondary talk-reopen">Re-open</button>`;
+  const statusTag = st !== 'open' ? `<span class="talk-status talk-status-${st}">${st}</span>` : '';
   return `
     <article class="talk-card" data-idx="${i}" data-id="${esc(talk.id)}">
       <div class="talk-head">
-        <span class="talk-goal">${esc(goalLabel(talk.goal))}</span>
+        <span class="talk-goal">${esc(goalLabel(talk.goal))}</span>${statusTag}
         <h3 class="talk-title">${esc(talk.title)}</h3>
       </div>
       ${talk.thesis ? `<p class="talk-thesis">${esc(talk.thesis)}</p>` : ''}
@@ -1402,50 +1451,74 @@ function talkCardHtml(talk, i) {
       ${talk.outcome ? `<p class="talk-outcome"><span class="talk-outcome-label">Outcome</span> ${esc(talk.outcome)}</p>` : ''}
       <details class="talk-outline"><summary>${talk.outline.length} segments · outline</summary><ol class="talk-segs">${segs}</ol></details>
       ${talk.buildsOn?.length ? `<p class="talk-buildson">Builds on: ${talk.buildsOn.map((b) => `<span class="talk-tag">${esc(b)}</span>`).join(' ')}</p>` : ''}
-      <div class="talk-actions">
-        <button class="primary talk-plan">Plan this</button>
-        <button class="ghost talk-dismiss">Dismiss</button>
-      </div>
+      <div class="talk-actions">${actions}</div>
+      <div class="talk-kit-slot" data-kit-for="${esc(talk.id)}"></div>
     </article>`;
 }
 
+const TALK_FILTERS = ['open', 'planned', 'all'];
+
 async function renderTalks(view, stale) {
-  const talks = await api(`${state.ws}/talks?status=open`);
+  const filter = state.talkFilter && TALK_FILTERS.includes(state.talkFilter) ? state.talkFilter : 'open';
+  const q = filter === 'all' ? '' : `?status=${filter}`;
+  const talks = await api(`${state.ws}/talks${q}`);
   if (stale()) return;
   setBudget(0);
-  // index receipts per talk for the outline chips
   talks.forEach((t) => { t._byId = Object.fromEntries((t.utterances || []).map((u) => [u.id, u])); });
 
+  const filterCtl = `<div class="talk-filter" role="group" aria-label="Filter talks">
+    ${TALK_FILTERS.map((f) => `<button class="talk-filter-btn ${f === filter ? 'on' : ''}" data-filter="${f}">${f === 'all' ? 'All' : f[0].toUpperCase() + f.slice(1)}</button>`).join('')}
+  </div>`;
   const toolbar = `<div class="ideas-toolbar">
     <button class="secondary" id="propose-talks-btn">✦ Propose talks</button>
     <select id="talk-goal" title="Focus the slate on one goal (optional)">
       <option value="">any goal</option>
       ${GOAL_OPTIONS.map((g) => `<option value="${g}">${esc(goalLabel(g))}</option>`).join('')}
     </select>
+    ${filterCtl}
   </div>`;
 
+  const emptyMsg = filter === 'open'
+    ? `No open talk proposals.<div class="hint"><strong>Propose talks</strong> to surface feasible, goal-oriented talks from your corpus — or check <em>Planned</em> for ones you've shortlisted.</div>`
+    : `Nothing here.<div class="hint">Try a different filter, or <strong>Propose talks</strong>.</div>`;
   const body = talks.length === 0
-    ? `<div class="empty">No talk proposals yet.<div class="hint"><strong>Propose talks</strong> to have the system read your corpus (and what you've already delivered) and suggest feasible, goal-oriented talks you could give — each grounded in real material.</div></div>`
+    ? `<div class="empty">${emptyMsg}</div>`
     : `<div class="talk-grid">${talks.map((t, i) => talkCardHtml(t, i)).join('')}</div>`;
 
   view.innerHTML = helpPanel('talks') + toolbar + body;
   wireHelp(view);
 
+  $$('.talk-filter-btn', view).forEach((b) => b.addEventListener('click', () => { state.talkFilter = b.dataset.filter; render(); }));
+
   $$('.talk-card', view).forEach((card) => {
     const talk = talks[Number(card.dataset.idx)];
     if (!talk) return;
     wireChips(card, talk.utterances || []);
+    const slot = $('.talk-kit-slot', card);
+
+    const renderKitInto = (kit) => { slot.innerHTML = talkKitHtml(kit); wireChips(slot, kit.utterances || []); };
+
     $('.talk-plan', card)?.addEventListener('click', (e) =>
-      busy(e.target, async () => {
-        await api(`${state.ws}/talks/${talk.id}/plan`, { method: 'POST' });
-        toast('Marked as planned.');
-        render();
-      }),
-    );
+      busy(e.target, async () => { await api(`${state.ws}/talks/${talk.id}/plan`, { method: 'POST' }); toast('Marked as planned — see the Planned tab.'); render(); }));
+    $('.talk-reopen', card)?.addEventListener('click', (e) =>
+      busy(e.target, async () => { await api(`${state.ws}/talks/${talk.id}/reopen`, { method: 'POST' }); toast('Re-opened onto the slate.'); render(); }));
     $('.talk-dismiss', card)?.addEventListener('click', async () => {
       try { await api(`${state.ws}/talks/${talk.id}/dismiss`, { method: 'POST' }); toast('Talk dismissed.'); render(); }
       catch (err) { toast(err.message, true); }
     });
+    $('.talk-develop', card)?.addEventListener('click', (e) =>
+      busy(e.target, async () => {
+        slot.innerHTML = '<p class="ros-working">Developing a grounded run-of-show — reading the corpus segment by segment…</p>';
+        const kit = await api(`${state.ws}/talks/${talk.id}/develop`, { method: 'POST' });
+        renderKitInto(kit);
+        toast(`Run-of-show ready — ${kit.grounding?.sourced ?? 0} sourced claims.`);
+        e.target.textContent = 'Regenerate run-of-show';
+      }));
+
+    // Lazily show an already-developed kit (planned/dismissed cards) without regenerating.
+    if (talk.status !== 'open') {
+      api(`${state.ws}/talks/${talk.id}/kit`).then((kit) => { if (kit && !stale()) renderKitInto(kit); }).catch(() => { /* no kit yet */ });
+    }
   });
 
   $('#propose-talks-btn', view)?.addEventListener('click', (e) =>
@@ -1453,6 +1526,7 @@ async function renderTalks(view, stale) {
       const goal = $('#talk-goal', view)?.value || undefined;
       const created = await api(`${state.ws}/talks/propose`, { method: 'POST', body: { goal } });
       toast(created.length ? `${created.length} talk${created.length > 1 ? 's' : ''} proposed.` : 'No feasible talks surfaced — try adding more corpus.');
+      if (state.talkFilter && state.talkFilter !== 'open' && state.talkFilter !== 'all') state.talkFilter = 'open';
       render();
     }),
   );

@@ -828,5 +828,43 @@ a.corpus-uri:hover { color: var(--pencil); text-decoration: underline; }
 .talk-seg-sum { color: var(--muted); display: block; margin-top: 2px; }
 .talk-seg-chips { margin-top: 6px; }
 .talk-buildson { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
-.talk-actions { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px; }
+.talk-actions { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px; flex-wrap: wrap; }
 .talk-actions .talk-dismiss { margin-left: auto; }
+.talk-status { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; border-radius: 999px; padding: 1px 8px; margin-left: 8px; }
+.talk-status-planned { color: var(--pencil); background: var(--pencil-soft); }
+.talk-status-dismissed { color: var(--muted); background: var(--line); }
+
+/* Talks filter (Open / Planned / All) */
+.talk-filter { display: inline-flex; gap: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; margin-left: auto; }
+.talk-filter-btn { border: none; background: var(--surface); color: var(--muted); padding: 6px 12px; font-size: 12.5px; cursor: pointer; border-right: 1px solid var(--line); }
+.talk-filter-btn:last-child { border-right: none; }
+.talk-filter-btn.on { background: var(--pencil-soft); color: var(--pencil); font-weight: 600; }
+
+/* Run-of-show (developed talk_kit) */
+.talk-kit-slot:empty { display: none; }
+.ros { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
+.ros-working { font-size: 13px; color: var(--muted); font-style: italic; }
+.ros-summary { font-size: 12px; color: var(--muted); font-family: var(--mono); margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.ros-legend { display: inline-flex; gap: 10px; align-items: center; }
+.ros-legend .zone-sourced, .ros-legend .zone-connective, .ros-legend .zone-speaker { font-size: 9px; }
+.zone-sourced { color: var(--green); }
+.zone-connective { color: var(--muted); }
+.zone-speaker { color: var(--violet); }
+.ros-seg { margin-bottom: 18px; }
+.ros-seg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.ros-seg-title { font-family: var(--serif); font-size: 16px; margin: 0; color: var(--ink); }
+.ros-cov { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+.cov-full { color: var(--green); background: var(--green-soft); }
+.cov-partial { color: var(--amber); background: var(--amber-soft); }
+.cov-thin { color: var(--muted); background: var(--line); }
+.ros-gap { font-size: 12.5px; color: var(--amber); font-style: italic; margin: 0 0 8px; }
+.ros-points { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.ros-point { font-size: 13.5px; line-height: 1.5; padding: 6px 10px; border-left: 2px solid var(--line); border-radius: 3px; }
+.ros-point.zone-sourced { border-left-color: var(--green); background: color-mix(in srgb, var(--green-soft) 45%, transparent); }
+.ros-point.zone-connective { border-left-color: var(--line-strong); color: var(--muted); font-style: italic; }
+.ros-point.zone-speaker { border-left-color: var(--violet); border-left-style: dashed; color: var(--violet); background: color-mix(in srgb, var(--violet-soft) 40%, transparent); }
+.ros-point-text { display: inline; }
+.ros-zone { font-family: var(--mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 8px; opacity: 0.7; }
+.ros-chips { margin-top: 6px; }
+.ros-notes { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; line-height: 1.5; }
+.ros-notes-label { font-family: var(--mono); font-size: 10px; text-transform: uppercase; color: var(--pencil); margin-right: 6px; }

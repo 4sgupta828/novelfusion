@@ -12,15 +12,22 @@
 
 import { z } from 'zod/v4';
 import { structured } from '../llm/client.js';
+import { config } from '../config.js';
 import {
   listUtterances,
   listSources,
   insertTalkProposal,
   getTalkProposal,
   updateTalkProposalStatus,
+  getUtterancesByIdsOrdered,
+  getActiveVoicePersona,
+  upsertTalkKit,
+  getTalkKit,
   type NewTalkProposal,
 } from '../db/index.js';
-import type { TalkProposal, TalkSegment, Utterance } from '../domain/types.js';
+import { hybridSearch } from './retrieval.js';
+import { verifySpanAny, numericGrounded, judgeFaithfulness } from './grounding.js';
+import type { TalkProposal, TalkSegment, TalkKit, TalkPoint, DevelopedSegment, VoicePersona, Utterance } from '../domain/types.js';
 
 const INPUT_CHARS = 34000; // broad read: a talk needs cross-source range to be feasible
 
@@ -116,7 +123,7 @@ export async function proposeTalks(workspaceId: string, opts: { goal?: string } 
     system: SYSTEM,
     user: `DELIVERED / EXISTING CONTENT INVENTORY (for novelty — avoid re-running these; build beyond them):\n${inventory}\n\nCORPUS SAMPLE (${sample.length} passages${sample.length < all.length ? `, sampled from ${all.length}` : ''}; format "id: text"):\n\n${renderPassages(sample)}${goalLine}`,
     schema: TalkSchema,
-    maxTokens: 10000,
+    maxTokens: 16000, // 6 talks + grounded outlines is a large object; 10k could truncate the JSON mid-string
   });
 
   const created: TalkProposal[] = [];
@@ -160,4 +167,167 @@ export function dismissTalk(workspaceId: string, id: string): void {
   const t = getTalkProposal(workspaceId, id);
   if (!t) throw new Error('Talk proposal not found.');
   updateTalkProposalStatus(workspaceId, id, 'dismissed');
+}
+
+/** Re-open a planned (or dismissed) proposal back onto the slate. */
+export function reopenTalk(workspaceId: string, id: string): TalkProposal {
+  const t = getTalkProposal(workspaceId, id);
+  if (!t) throw new Error('Talk proposal not found.');
+  updateTalkProposalStatus(workspaceId, id, 'open');
+  return getTalkProposal(workspaceId, id)!;
+}
+
+// ---------- develop: a planned talk → a grounded run-of-show (talk_kit) ----------
+
+const PER_SEGMENT_EXPAND = 12; // extra passages retrieved per segment when corpus-query is on
+
+function personaLine(persona: VoicePersona | null): string {
+  if (!persona || !persona.enabled) return '';
+  const p = persona.profile;
+  const list = (xs?: string[]) => (xs ?? []).filter(Boolean).join('; ');
+  const bits = [
+    p.summary ? `sounds like ${p.summary}` : '',
+    p.register ? `register: ${p.register}` : '',
+    p.lexicon?.avoids?.length ? `NEVER uses: ${list(p.lexicon.avoids)}` : '',
+  ].filter(Boolean);
+  return bits.length ? `\n\nBRAND VOICE (shape tone/framing, never the facts): ${bits.join(' · ')}` : '';
+}
+
+const PointSchema = z.object({
+  text: z.string().describe('one talking point — a single sentence the speaker can say'),
+  zone: z
+    .enum(['sourced', 'connective', 'speaker_owned'])
+    .describe('sourced = a factual claim backed by a passage (MUST include supportingSpan + utteranceIds); connective = a transition/framing line (no receipts, it is scaffold); speaker_owned = a prompt/blank for the speaker to fill with their own words'),
+  supportingSpan: z.string().describe('for sourced points ONLY: a VERBATIM span copied from one cited passage that supports this point. Empty for connective/speaker_owned.'),
+  utteranceIds: z.array(z.string()).describe('for sourced points ONLY: the passage ids (verbatim, as labeled) backing this point. Empty otherwise.'),
+});
+
+const DevelopSegmentSchema = z.object({
+  points: z.array(PointSchema).min(1).describe('the talking points for this segment, in delivery order'),
+  speakerNotes: z.string().describe('brief delivery guidance for the speaker (pace, emphasis, what to watch for) — not content claims'),
+});
+
+const DEVELOP_SYSTEM = `You develop ONE segment of a talk into a run-of-show a REAL person will deliver. You are NOT writing a script to be read verbatim as if it were the speaker's own authored thinking — you are preparing grounded talking points, honestly labeled.
+
+Every talking point has a ZONE:
+- "sourced": a factual claim. It MUST be backed by the provided passages — include a VERBATIM supportingSpan copied from ONE cited passage, and the utteranceIds it rests on. If the passages don't support a claim, DO NOT invent one.
+- "connective": a transition, framing, or rhetorical line. No receipts — it is scaffold, and it will be labeled as such (never presented as the speaker's sourced fact).
+- "speaker_owned": a prompt for the speaker to fill in their OWN words/story/opinion (e.g. "[Open with your own experience of …]").
+
+Rules:
+- Ground every sourced point in the passages given for THIS segment. Never cite an id you were not given. Never fabricate a figure or a quote.
+- Prefer honesty over coverage: if the material is thin, produce fewer sourced points and more speaker_owned prompts. A thin segment is fine; a fabricated one is not.
+- Do not compute or derive figures the passages don't literally state.
+- Keep points tight and speakable.`;
+
+/** Grounding gate for one sourced point (mirrors the Query pipeline: id-validate → span → numeric →
+ *  faithfulness). Returns the cleaned point, or null if it fails any gate (coverage-collapse: an
+ *  ungrounded claim is dropped, never shown). */
+function gateSourced(
+  raw: { text: string; supportingSpan: string; utteranceIds: string[] },
+  byId: Map<string, WsUtterance>,
+): TalkPoint | null {
+  const ids = raw.utteranceIds.filter((id) => byId.has(id)); // fail-safe: drop fabricated ids
+  if (ids.length === 0) return null;
+  const citedTexts = ids.map((id) => byId.get(id)!.text);
+  const span = verifySpanAny(citedTexts, raw.supportingSpan);
+  if (!span.verified) return null; // the claimed span isn't actually in the cited passages
+  if (!numericGrounded(raw.text, citedTexts).ok) return null; // a figure the evidence doesn't print
+  return { text: raw.text.trim(), zone: 'sourced', supportingSpan: raw.supportingSpan.trim(), utteranceIds: ids, spanMethod: span.method as 'exact' | 'fuzzy' };
+}
+
+const coverageOf = (sourcedCount: number): DevelopedSegment['coverage'] => (sourcedCount >= 3 ? 'full' : sourcedCount >= 1 ? 'partial' : 'thin');
+
+/** Develop a planned talk proposal into a grounded run-of-show. Each outline segment is expanded into
+ *  talking points; sourced claims pass the grounding.ts gates (id → span → numeric → faithfulness,
+ *  fail-closed), connective/speaker_owned are labeled scaffold. Per-segment coverage is honest — a
+ *  segment the corpus can't support becomes a labeled gap, never confabulation. Persists one kit. */
+export async function developTalk(workspaceId: string, talkId: string): Promise<TalkKit> {
+  const talk = getTalkProposal(workspaceId, talkId);
+  if (!talk) throw new Error('Talk proposal not found.');
+  if (talk.status === 'dismissed') throw new Error('Cannot develop a dismissed talk.');
+  if (talk.outline.length === 0) throw new Error('This proposal has no outline to develop.');
+
+  const persona = getActiveVoicePersona(workspaceId);
+  // Faithfulness judge is the different-family (OpenAI) gate — apply it when the corpus-query stack
+  // is enabled and a key is present (same policy as the Query pipeline); else deterministic gates only.
+  const useFaithfulness = config.flags.corpusQuery && !!process.env.OPENAI_API_KEY;
+
+  const developed: DevelopedSegment[] = [];
+  let totalSourced = 0;
+  let totalDropped = 0;
+
+  for (const seg of talk.outline) {
+    // Grounded passages for this segment: the outline's receipts, expanded via hybrid retrieval when on.
+    const byId = new Map<string, WsUtterance>();
+    for (const u of getUtterancesByIdsOrdered(workspaceId, seg.utteranceIds)) byId.set(u.id, u as WsUtterance);
+    if (config.flags.corpusQuery) {
+      try {
+        const { ids } = await hybridSearch(workspaceId, `${seg.title}. ${seg.summary}`, { topK: PER_SEGMENT_EXPAND });
+        for (const u of getUtterancesByIdsOrdered(workspaceId, ids)) if (!byId.has(u.id)) byId.set(u.id, u as WsUtterance);
+      } catch { /* retrieval is best-effort expansion; the seed receipts still ground the segment */ }
+    }
+    const passages = [...byId.values()];
+    const shown = passages.map((p) => `${p.id}: ${p.text}`).join('\n');
+
+    const result = await structured({
+      stage: 'develop-talk-segment',
+      system: DEVELOP_SYSTEM + personaLine(persona),
+      user: `TALK: ${talk.title}\nGOAL: ${talk.goal} — ${talk.outcome}\nAUDIENCE: ${talk.audience}\n\nSEGMENT: ${seg.title}\n${seg.summary}\n\nPASSAGES for this segment (format "id: text"; ground every sourced point here):\n\n${shown || '(no passages — produce speaker_owned prompts only, do not invent sourced claims)'}`,
+      schema: DevelopSegmentSchema,
+      maxTokens: 4000,
+    });
+
+    // Gate each point by zone.
+    const sourcedRaw = result.points.filter((p) => p.zone === 'sourced');
+    const gatedSourced: (TalkPoint | null)[] = sourcedRaw.map((p) => gateSourced(p, byId));
+
+    // Optional different-family faithfulness pass on survivors (parallel; fail-closed).
+    let survivors: TalkPoint[] = gatedSourced.filter((p): p is TalkPoint => p !== null);
+    if (useFaithfulness && survivors.length) {
+      const verdicts = await Promise.all(
+        survivors.map((p) => judgeFaithfulness(p.text, p.utteranceIds.map((id) => byId.get(id)!.text)).catch(() => ({ faithful: false, reason: 'error' }))),
+      );
+      survivors = survivors.filter((_, i) => verdicts[i]!.faithful);
+    }
+    totalDropped += sourcedRaw.length - survivors.length;
+    totalSourced += survivors.length;
+
+    // Reassemble points in the model's order: keep connective/speaker_owned as-is, swap sourced for survivors.
+    const survivorTexts = new Set(survivors.map((s) => s.text.trim()));
+    const points: TalkPoint[] = [];
+    for (const p of result.points) {
+      if (p.zone === 'sourced') {
+        const kept = survivors.find((s) => s.text.trim() === p.text.trim());
+        if (kept && survivorTexts.has(p.text.trim())) { points.push(kept); survivorTexts.delete(p.text.trim()); }
+        // dropped sourced points simply vanish (fail-safe)
+      } else {
+        points.push({ text: p.text.trim(), zone: p.zone, utteranceIds: [] });
+      }
+    }
+
+    const sourcedKept = points.filter((p) => p.zone === 'sourced').length;
+    const coverage = coverageOf(sourcedKept);
+    developed.push({
+      title: seg.title,
+      summary: seg.summary,
+      points,
+      speakerNotes: result.speakerNotes.trim(),
+      coverage,
+      gapNote: coverage === 'thin' ? 'The corpus does not yet support grounded claims for this segment — deliver it from your own experience, or add source material.' : null,
+    });
+  }
+
+  return upsertTalkKit({
+    workspaceId,
+    talkId,
+    title: talk.title,
+    segments: developed,
+    grounding: { sourced: totalSourced, dropped: totalDropped, faithfulnessApplied: useFaithfulness },
+  });
+}
+
+/** The developed run-of-show for a talk, if one exists. */
+export function talkKit(workspaceId: string, talkId: string): TalkKit | null {
+  return getTalkKit(workspaceId, talkId);
 }

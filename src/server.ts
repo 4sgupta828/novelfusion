@@ -51,7 +51,7 @@ import {
   deleteTalkProposal,
 } from './db/index.js';
 import { generateIdeaClusters, brainstormIdeas, promoteIdeaToMoment } from './pipeline/ideas.js';
-import { proposeTalks, planTalk, dismissTalk } from './pipeline/talks.js';
+import { proposeTalks, planTalk, dismissTalk, reopenTalk, developTalk, talkKit } from './pipeline/talks.js';
 import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
 import { discoverSources } from './pipeline/discover.js';
 import { sweepFootprint } from './pipeline/footprint.js';
@@ -280,6 +280,34 @@ app.delete('/api/:ws/talks/:id', wrap((req, res) => {
   if (!talkKitGate(res)) return;
   deleteTalkProposal(param(req, 'ws'), param(req, 'id'));
   res.json({ ok: true });
+}));
+
+app.post('/api/:ws/talks/:id/reopen', wrap((req, res) => {
+  if (!talkKitGate(res)) return;
+  const ws = param(req, 'ws');
+  const talk = reopenTalk(ws, param(req, 'id'));
+  res.json({ ok: true, talk: hydrateTalk(ws, talk) });
+}));
+
+// Hydrate a run-of-show's receipts: gather every sourced point's utterance ids and attach texts.
+const hydrateKit = (ws: string, kit: import('./domain/types.js').TalkKit) => {
+  const ids = [...new Set(kit.segments.flatMap((s) => s.points.flatMap((p) => p.utteranceIds)))];
+  return { ...kit, utterances: getUtterancesByIdsOrdered(ws, ids) };
+};
+
+app.post('/api/:ws/talks/:id/develop', wrap(async (req, res) => {
+  if (!talkKitGate(res)) return;
+  const ws = param(req, 'ws');
+  const kit = await developTalk(ws, param(req, 'id'));
+  res.json(hydrateKit(ws, kit));
+}));
+
+app.get('/api/:ws/talks/:id/kit', wrap((req, res) => {
+  if (!talkKitGate(res)) return;
+  const ws = param(req, 'ws');
+  const kit = talkKit(ws, param(req, 'id'));
+  if (!kit) return void res.status(404).json({ error: 'no run-of-show yet' });
+  res.json(hydrateKit(ws, kit));
 }));
 
 app.get('/api/:ws/slate', wrap((req, res) => {

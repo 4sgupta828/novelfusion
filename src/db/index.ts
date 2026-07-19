@@ -9,6 +9,7 @@ import type {
   Collaborator,
   Idea,
   TalkProposal,
+  TalkKit,
   VoicePersona,
   CounterfactualResult,
   Draft,
@@ -758,7 +759,47 @@ export function updateTalkProposalStatus(workspaceId: string, id: string, status
 }
 
 export function deleteTalkProposal(workspaceId: string, id: string): void {
-  getDb().prepare('DELETE FROM talk_proposals WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
+  const tx = getDb().transaction(() => {
+    getDb().prepare('DELETE FROM talk_kits WHERE workspace_id = ? AND talk_id = ?').run(workspaceId, id);
+    getDb().prepare('DELETE FROM talk_proposals WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
+  });
+  tx();
+}
+
+// ---------- talk kits (developed run-of-show for a planned talk) ----------
+
+function rowToTalkKit(r: Record<string, unknown>): TalkKit {
+  return {
+    id: r.id as string,
+    workspaceId: r.workspace_id as string,
+    talkId: r.talk_id as string,
+    title: r.title as string,
+    segments: JSON.parse((r.segments as string) ?? '[]'),
+    grounding: JSON.parse((r.grounding as string) ?? '{}'),
+    createdAt: r.created_at as string,
+  };
+}
+
+/** One current kit per talk — regenerate replaces the prior one. */
+export function upsertTalkKit(kit: Omit<TalkKit, 'id' | 'createdAt'>): TalkKit {
+  const id = newId('talkkit');
+  const tx = getDb().transaction(() => {
+    getDb().prepare('DELETE FROM talk_kits WHERE workspace_id = ? AND talk_id = ?').run(kit.workspaceId, kit.talkId);
+    getDb()
+      .prepare('INSERT INTO talk_kits (id, workspace_id, talk_id, title, segments, grounding) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, kit.workspaceId, kit.talkId, kit.title, JSON.stringify(kit.segments), JSON.stringify(kit.grounding));
+  });
+  tx();
+  return getTalkKit(kit.workspaceId, kit.talkId)!;
+}
+
+export function getTalkKit(workspaceId: string, talkId: string): TalkKit | null {
+  const r = getDb().prepare('SELECT * FROM talk_kits WHERE workspace_id = ? AND talk_id = ? ORDER BY created_at DESC').get(workspaceId, talkId) as Record<string, unknown> | undefined;
+  return r ? rowToTalkKit(r) : null;
+}
+
+export function deleteTalkKit(workspaceId: string, talkId: string): void {
+  getDb().prepare('DELETE FROM talk_kits WHERE workspace_id = ? AND talk_id = ?').run(workspaceId, talkId);
 }
 
 export function listEdits(workspaceId: string, opts: { holdout?: boolean } = {}): EditEvent[] {

@@ -240,6 +240,43 @@ export interface TalkProposal {
   createdAt: string;
 }
 
+/** Attestation zone — the fix for "authorship laundering". A talking point is either a grounded
+ *  claim, labeled scaffold, or a blank for the speaker. Only 'sourced' points carry receipts and
+ *  pass the grounding gate; 'connective' and 'speaker_owned' are never presented as sourced fact. */
+export type TalkPointZone = 'sourced' | 'connective' | 'speaker_owned';
+
+export interface TalkPoint {
+  text: string;
+  zone: TalkPointZone;
+  /** Verbatim span from a cited passage (sourced points only) — the thing the span-gate verifies. */
+  supportingSpan?: string;
+  utteranceIds: string[]; // receipts (sourced points only)
+  spanMethod?: 'exact' | 'fuzzy'; // how the span verified (sourced points only)
+}
+
+export type SegmentCoverage = 'full' | 'partial' | 'thin';
+
+export interface DevelopedSegment {
+  title: string;
+  summary: string;
+  points: TalkPoint[];
+  speakerNotes: string;
+  coverage: SegmentCoverage; // from provenance density
+  gapNote: string | null; // set when the corpus can't support the segment (honest gap, not confabulation)
+}
+
+/** A developed run-of-show for a planned talk. Honest by construction: attestation zones + per-segment
+ *  coverage. Full long-form composition of the `talk_kit` direction (docs/specs/talk-kit.md). */
+export interface TalkKit {
+  id: string;
+  workspaceId: string;
+  talkId: string;
+  title: string;
+  segments: DevelopedSegment[];
+  grounding: { sourced: number; dropped: number; faithfulnessApplied: boolean };
+  createdAt: string;
+}
+
 /** The distilled brand voice — style plus soul — inferred from the workspace's published output.
  *  Each judgemental trait carries example utterance ids (receipts) it was inferred from. */
 export interface VoicePersonaProfile {
