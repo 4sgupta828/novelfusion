@@ -589,6 +589,12 @@ const clampSel = (count) => {
 /* ---------- per-page help (collapsible "How this works") ---------- */
 
 const HELP = {
+  talks: {
+    title: 'How the Talk Slate works',
+    body: `<p><strong>The Talk Slate proposes long-form talks your corpus can actually support.</strong> Where Ideas surfaces post-sized angles, this steps up to whole talks — webinars, workshops, conference sessions, podcasts, sales sessions, internal training. The AI reads across your corpus, looks at what you've <em>already delivered</em>, and proposes fresh talks you could give — each tied to a concrete <em>goal</em> (train, educate, enable sales, drive demand, establish authority, recruit, deep-dive) and a positive <em>outcome</em> for the company.</p>
+      <p><strong>Everything is grounded and honest.</strong> Each proposal ships a segment <em>outline</em> where every segment carries the receipts it rests on, plus two scores: <em>feasibility</em> (does the corpus really have the material for a whole talk?) and <em>novelty</em> (is this new, or a re-run of something you've already done?). Thin support means a low feasibility score, not an invented arc.</p>
+      <p><strong>Curate the slate:</strong> hit <em>Propose talks</em> (optionally focused on a goal), then <em>Plan</em> the ones worth developing or <em>Dismiss</em> the rest. This is the discovery layer — proposals, not finished talks. Turning a planned talk into a full run-of-show is a later step.</p>`,
+  },
   ideas: {
     title: 'How Ideas works',
     body: `<p><strong>Ideas is a scratch space upstream of the Slate.</strong> The Slate mines your corpus for moments one at a time; Ideas steps back and looks across the whole corpus for <em>novel fusions</em> — non-obvious connections between separate threads that, combined, give you a fresh point of view worth publishing. Nothing here is committed: ideas are candidates you curate.</p>
@@ -1365,6 +1371,93 @@ async function renderIdeas(view, stale) {
   });
 }
 
+/* ---------- talks: proposed long-form talks the corpus can support ---------- */
+
+const GOAL_LABEL = {
+  training: 'Training', education: 'Education', sales_enablement: 'Sales enablement',
+  demand_gen: 'Demand gen', thought_leadership: 'Thought leadership', community: 'Community',
+  recruiting: 'Recruiting', deep_dive: 'Deep dive', product_launch: 'Product launch',
+};
+const goalLabel = (g) => GOAL_LABEL[g] || (g || '').replace(/_/g, ' ');
+const GOAL_OPTIONS = ['training', 'education', 'sales_enablement', 'demand_gen', 'thought_leadership', 'community', 'recruiting', 'deep_dive', 'product_launch'];
+
+function talkCardHtml(talk, i) {
+  const segs = (talk.outline || []).map((s) => {
+    const chips = (s.utteranceIds || []).map((id) => talk._byId[id]).filter(Boolean).map(chipHtml).join('');
+    return `<li class="talk-seg"><span class="talk-seg-title">${esc(s.title)}</span>${s.summary ? `<span class="talk-seg-sum">${esc(s.summary)}</span>` : ''}${chips ? `<div class="chip-row talk-seg-chips">${chips}</div>` : ''}</li>`;
+  }).join('');
+  return `
+    <article class="talk-card" data-idx="${i}" data-id="${esc(talk.id)}">
+      <div class="talk-head">
+        <span class="talk-goal">${esc(goalLabel(talk.goal))}</span>
+        <h3 class="talk-title">${esc(talk.title)}</h3>
+      </div>
+      ${talk.thesis ? `<p class="talk-thesis">${esc(talk.thesis)}</p>` : ''}
+      <div class="talk-meta">
+        ${talk.format ? `<span class="talk-tag">${esc((talk.format || '').replace(/_/g, ' '))}</span>` : ''}
+        ${talk.audience ? `<span class="talk-tag talk-aud">for ${esc(talk.audience)}</span>` : ''}
+        <span class="pill neutral" title="how well the corpus supports a full talk">feasibility ${(talk.feasibility * 100).toFixed(0)}</span>
+        <span class="pill neutral" title="freshness vs. what you've already delivered">novelty ${(talk.novelty * 100).toFixed(0)}</span>
+      </div>
+      ${talk.outcome ? `<p class="talk-outcome"><span class="talk-outcome-label">Outcome</span> ${esc(talk.outcome)}</p>` : ''}
+      <details class="talk-outline"><summary>${talk.outline.length} segments · outline</summary><ol class="talk-segs">${segs}</ol></details>
+      ${talk.buildsOn?.length ? `<p class="talk-buildson">Builds on: ${talk.buildsOn.map((b) => `<span class="talk-tag">${esc(b)}</span>`).join(' ')}</p>` : ''}
+      <div class="talk-actions">
+        <button class="primary talk-plan">Plan this</button>
+        <button class="ghost talk-dismiss">Dismiss</button>
+      </div>
+    </article>`;
+}
+
+async function renderTalks(view, stale) {
+  const talks = await api(`${state.ws}/talks?status=open`);
+  if (stale()) return;
+  setBudget(0);
+  // index receipts per talk for the outline chips
+  talks.forEach((t) => { t._byId = Object.fromEntries((t.utterances || []).map((u) => [u.id, u])); });
+
+  const toolbar = `<div class="ideas-toolbar">
+    <button class="secondary" id="propose-talks-btn">✦ Propose talks</button>
+    <select id="talk-goal" title="Focus the slate on one goal (optional)">
+      <option value="">any goal</option>
+      ${GOAL_OPTIONS.map((g) => `<option value="${g}">${esc(goalLabel(g))}</option>`).join('')}
+    </select>
+  </div>`;
+
+  const body = talks.length === 0
+    ? `<div class="empty">No talk proposals yet.<div class="hint"><strong>Propose talks</strong> to have the system read your corpus (and what you've already delivered) and suggest feasible, goal-oriented talks you could give — each grounded in real material.</div></div>`
+    : `<div class="talk-grid">${talks.map((t, i) => talkCardHtml(t, i)).join('')}</div>`;
+
+  view.innerHTML = helpPanel('talks') + toolbar + body;
+  wireHelp(view);
+
+  $$('.talk-card', view).forEach((card) => {
+    const talk = talks[Number(card.dataset.idx)];
+    if (!talk) return;
+    wireChips(card, talk.utterances || []);
+    $('.talk-plan', card)?.addEventListener('click', (e) =>
+      busy(e.target, async () => {
+        await api(`${state.ws}/talks/${talk.id}/plan`, { method: 'POST' });
+        toast('Marked as planned.');
+        render();
+      }),
+    );
+    $('.talk-dismiss', card)?.addEventListener('click', async () => {
+      try { await api(`${state.ws}/talks/${talk.id}/dismiss`, { method: 'POST' }); toast('Talk dismissed.'); render(); }
+      catch (err) { toast(err.message, true); }
+    });
+  });
+
+  $('#propose-talks-btn', view)?.addEventListener('click', (e) =>
+    busy(e.target, async () => {
+      const goal = $('#talk-goal', view)?.value || undefined;
+      const created = await api(`${state.ws}/talks/propose`, { method: 'POST', body: { goal } });
+      toast(created.length ? `${created.length} talk${created.length > 1 ? 's' : ''} proposed.` : 'No feasible talks surfaced — try adding more corpus.');
+      render();
+    }),
+  );
+}
+
 async function renderVoice(view, stale) {
   const { persona, examples } = await api(`${state.ws}/persona`);
   if (stale()) return;
@@ -1860,6 +1953,7 @@ const VIEWS = {
   corpus: { title: 'Corpus', render: renderCorpus },
   slate: { title: 'Slate', render: renderSlate },
   ideas: { title: 'Ideas', render: renderIdeas },
+  talks: { title: 'Talks', render: renderTalks },
   drafts: { title: 'Drafts', render: renderDrafts },
   constitution: { title: 'Constitution', render: renderConstitution },
   voice: { title: 'Voice', render: renderVoice },
@@ -1931,7 +2025,8 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  const viewKeys = { 1: 'corpus', 2: 'slate', 3: 'ideas', 4: 'drafts', 5: 'constitution', 6: 'voice', 7: 'gate' };
+  const viewKeys = { 1: 'corpus', 2: 'slate', 3: 'ideas', 4: 'talks', 5: 'drafts', 6: 'constitution', 7: 'voice', 8: 'gate' };
+  if (viewKeys[e.key] === 'talks' && !state.serverFlags?.talkKit) return; // flagged view unreachable when off
   if (viewKeys[e.key]) return switchView(viewKeys[e.key]);
 
   const view = $('#view');
@@ -2086,6 +2181,8 @@ $('#weave-go').addEventListener('click', (e) => {
     workspaces = await api('workspaces');
     state.templates = await api('templates').catch(() => []);
     state.serverFlags = (await api('config').catch(() => ({}))).flags || {};
+    // Reveal flag-gated nav items whose flag is on (default hidden for byte-identical OFF path).
+    $$('.rail-item[data-flag]').forEach((b) => { if (state.serverFlags?.[b.dataset.flag]) b.hidden = false; });
   } catch (e) {
     $('#view').innerHTML = `<div class="empty">Can't reach the workbench server.<div class="hint">${esc(e.message)} — is <code>npm run ui</code> running?</div></div>`;
     return;

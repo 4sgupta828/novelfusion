@@ -47,8 +47,11 @@ import {
   getIdea,
   updateIdeaStatus,
   deleteIdea,
+  listTalkProposals,
+  deleteTalkProposal,
 } from './db/index.js';
 import { generateIdeaClusters, brainstormIdeas, promoteIdeaToMoment } from './pipeline/ideas.js';
+import { proposeTalks, planTalk, dismissTalk } from './pipeline/talks.js';
 import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
 import { discoverSources } from './pipeline/discover.js';
 import { sweepFootprint } from './pipeline/footprint.js';
@@ -160,7 +163,7 @@ app.get('/api/templates', wrap((_req, res) => {
 
 // Client-visible feature flags (drives conditional UI: Query box, download affordance).
 app.get('/api/config', wrap((_req, res) => {
-  res.json({ flags: { corpusQuery: config.flags.corpusQuery, retainOriginals: config.flags.retainOriginals, sourceDiscovery: config.flags.sourceDiscovery } });
+  res.json({ flags: { corpusQuery: config.flags.corpusQuery, retainOriginals: config.flags.retainOriginals, sourceDiscovery: config.flags.sourceDiscovery, talkKit: config.flags.talkKit } });
 }));
 
 // ---------- collaborators (named experts who author versions) ----------
@@ -226,6 +229,56 @@ app.post('/api/:ws/ideas/:id/dismiss', wrap((req, res) => {
 
 app.delete('/api/:ws/ideas/:id', wrap((req, res) => {
   deleteIdea(param(req, 'ws'), param(req, 'id'));
+  res.json({ ok: true });
+}));
+
+// ---------- talk slate (proposed long-form talks; behind NF_FLAG_TALK_KIT) ----------
+
+const talkKitGate = (res: import('express').Response): boolean => {
+  if (!config.flags.talkKit) {
+    res.status(404).json({ error: 'talk slate is disabled (flag NF_FLAG_TALK_KIT off)' });
+    return false;
+  }
+  return true;
+};
+
+const hydrateTalk = (ws: string, t: import('./domain/types.js').TalkProposal) => ({
+  ...t,
+  utterances: getUtterancesByIdsOrdered(ws, t.sourceUtteranceIds),
+});
+
+app.get('/api/:ws/talks', wrap((req, res) => {
+  if (!talkKitGate(res)) return;
+  const ws = param(req, 'ws');
+  const status = typeof req.query.status === 'string' ? (req.query.status as import('./domain/types.js').TalkStatus) : undefined;
+  res.json(listTalkProposals(ws, status).map((t) => hydrateTalk(ws, t)));
+}));
+
+app.post('/api/:ws/talks/propose', wrap(async (req, res) => {
+  if (!talkKitGate(res)) return;
+  const ws = param(req, 'ws');
+  const goal = typeof req.body?.goal === 'string' && req.body.goal.trim() ? req.body.goal.trim() : undefined;
+  const created = await proposeTalks(ws, { goal });
+  res.json(created.map((t) => hydrateTalk(ws, t)));
+}));
+
+app.post('/api/:ws/talks/:id/plan', wrap((req, res) => {
+  if (!talkKitGate(res)) return;
+  const ws = param(req, 'ws');
+  const talk = planTalk(ws, param(req, 'id'));
+  res.json({ ok: true, talk: hydrateTalk(ws, talk) });
+}));
+
+app.post('/api/:ws/talks/:id/dismiss', wrap((req, res) => {
+  if (!talkKitGate(res)) return;
+  const ws = param(req, 'ws');
+  dismissTalk(ws, param(req, 'id'));
+  res.json({ ok: true });
+}));
+
+app.delete('/api/:ws/talks/:id', wrap((req, res) => {
+  if (!talkKitGate(res)) return;
+  deleteTalkProposal(param(req, 'ws'), param(req, 'id'));
   res.json({ ok: true });
 }));
 

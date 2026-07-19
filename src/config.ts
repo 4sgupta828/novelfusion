@@ -30,5 +30,9 @@ export const config = {
     // Auto-discover public web sources via Exa (results land quarantined, pending review).
     // Default OFF (Rule 20); needs EXA_API_KEY. New external-network path (Rule 15).
     sourceDiscovery: flag('NF_FLAG_SOURCE_DISCOVERY'),
+    // Talk Slate: propose feasible long-form talks from the corpus (the discovery layer of the
+    // `talk_kit` direction, docs/specs/talk-kit.md). Default OFF (Rule 20): when off, the Talks nav
+    // view is hidden and its endpoints 404. Full long-form talk composition remains deferred.
+    talkKit: flag('NF_FLAG_TALK_KIT'),
   },
 };

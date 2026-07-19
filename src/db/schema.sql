@@ -120,6 +120,34 @@ CREATE TABLE IF NOT EXISTS ideas (
 );
 CREATE INDEX IF NOT EXISTS idx_ideas_ws ON ideas(workspace_id, status);
 
+-- Talk proposals: a slate of feasible long-form TALKS the corpus can support, each tied to a concrete
+-- goal (training / education / sales / marketing / deep-dive / …) and a positive company outcome.
+-- Analogous to the Ideas board but for long-form: AI reads the corpus, sees what has already been
+-- delivered (the source inventory), and proposes NEW talks — grounded (receipts), with a segment
+-- outline, scored for feasibility (does the corpus support a whole talk?) and novelty (vs delivered
+-- content). A proposal is a candidate, NOT a talk_kit; "plan" marks one to develop later. This is the
+-- discovery layer of the `talk_kit` direction (docs/specs/talk-kit.md); full long-form composition +
+-- grounding gates + attestation are deferred. Behind NF_FLAG_TALK_KIT (Rule 20).
+CREATE TABLE IF NOT EXISTS talk_proposals (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  title TEXT NOT NULL,
+  goal TEXT NOT NULL,                              -- concrete goal category (LLM-chosen; Rule 18)
+  outcome TEXT NOT NULL DEFAULT '',                -- the positive company outcome this talk drives
+  thesis TEXT NOT NULL DEFAULT '',                 -- what the talk argues/teaches (the premise)
+  audience TEXT NOT NULL DEFAULT '',               -- who it's for
+  format TEXT NOT NULL DEFAULT 'webinar',          -- suggested delivery format
+  outline TEXT NOT NULL DEFAULT '[]',              -- JSON [{title, summary, utteranceIds}] grounded arc
+  source_utterance_ids TEXT NOT NULL DEFAULT '[]', -- JSON receipts (moments making it feasible)
+  feasibility REAL NOT NULL DEFAULT 0.5,           -- 0..1 how well the corpus supports a full talk
+  novelty REAL NOT NULL DEFAULT 0.5,               -- 0..1 vs already-delivered talks/content
+  rationale TEXT NOT NULL DEFAULT '',              -- why now / why this
+  builds_on TEXT NOT NULL DEFAULT '[]',            -- JSON source titles it builds on/overlaps (awareness)
+  status TEXT NOT NULL DEFAULT 'open',             -- 'open' | 'planned' | 'dismissed'
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_talk_proposals_ws ON talk_proposals(workspace_id, status);
+
 CREATE TABLE IF NOT EXISTS drafts (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspaces(id),

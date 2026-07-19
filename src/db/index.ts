@@ -8,6 +8,7 @@ import type {
   Cluster,
   Collaborator,
   Idea,
+  TalkProposal,
   VoicePersona,
   CounterfactualResult,
   Draft,
@@ -685,6 +686,79 @@ export function updateIdeaStatus(workspaceId: string, id: string, status: Idea['
 
 export function deleteIdea(workspaceId: string, id: string): void {
   getDb().prepare('DELETE FROM ideas WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
+}
+
+// ---------- talk proposals (the Talk Slate — discovery layer of talk_kit) ----------
+
+function rowToTalkProposal(r: Record<string, unknown>): TalkProposal {
+  return {
+    id: r.id as string,
+    workspaceId: r.workspace_id as string,
+    title: r.title as string,
+    goal: r.goal as string,
+    outcome: (r.outcome as string) ?? '',
+    thesis: (r.thesis as string) ?? '',
+    audience: (r.audience as string) ?? '',
+    format: (r.format as string) ?? 'webinar',
+    outline: JSON.parse((r.outline as string) ?? '[]'),
+    sourceUtteranceIds: JSON.parse((r.source_utterance_ids as string) ?? '[]'),
+    feasibility: (r.feasibility as number) ?? 0.5,
+    novelty: (r.novelty as number) ?? 0.5,
+    rationale: (r.rationale as string) ?? '',
+    buildsOn: JSON.parse((r.builds_on as string) ?? '[]'),
+    status: r.status as TalkProposal['status'],
+    createdAt: r.created_at as string,
+  };
+}
+
+export type NewTalkProposal = Omit<TalkProposal, 'id' | 'status' | 'createdAt'>;
+
+export function insertTalkProposal(t: NewTalkProposal): TalkProposal {
+  const id = newId('talk');
+  getDb()
+    .prepare(
+      `INSERT INTO talk_proposals (id, workspace_id, title, goal, outcome, thesis, audience, format, outline, source_utterance_ids, feasibility, novelty, rationale, builds_on)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      t.workspaceId,
+      t.title,
+      t.goal,
+      t.outcome,
+      t.thesis,
+      t.audience,
+      t.format,
+      JSON.stringify(t.outline),
+      JSON.stringify(t.sourceUtteranceIds),
+      t.feasibility,
+      t.novelty,
+      t.rationale,
+      JSON.stringify(t.buildsOn),
+    );
+  return getTalkProposal(t.workspaceId, id)!;
+}
+
+export function getTalkProposal(workspaceId: string, id: string): TalkProposal | null {
+  const r = getDb().prepare('SELECT * FROM talk_proposals WHERE workspace_id = ? AND id = ?').get(workspaceId, id) as Record<string, unknown> | undefined;
+  return r ? rowToTalkProposal(r) : null;
+}
+
+export function listTalkProposals(workspaceId: string, status?: TalkProposal['status']): TalkProposal[] {
+  const rows = (
+    status
+      ? getDb().prepare('SELECT * FROM talk_proposals WHERE workspace_id = ? AND status = ? ORDER BY feasibility DESC, created_at DESC').all(workspaceId, status)
+      : getDb().prepare('SELECT * FROM talk_proposals WHERE workspace_id = ? ORDER BY feasibility DESC, created_at DESC').all(workspaceId)
+  ) as Record<string, unknown>[];
+  return rows.map(rowToTalkProposal);
+}
+
+export function updateTalkProposalStatus(workspaceId: string, id: string, status: TalkProposal['status']): void {
+  getDb().prepare('UPDATE talk_proposals SET status = ? WHERE workspace_id = ? AND id = ?').run(status, workspaceId, id);
+}
+
+export function deleteTalkProposal(workspaceId: string, id: string): void {
+  getDb().prepare('DELETE FROM talk_proposals WHERE workspace_id = ? AND id = ?').run(workspaceId, id);
 }
 
 export function listEdits(workspaceId: string, opts: { holdout?: boolean } = {}): EditEvent[] {

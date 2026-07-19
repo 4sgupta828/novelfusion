@@ -208,6 +208,38 @@ export interface Idea {
   createdAt: string;
 }
 
+export type TalkStatus = 'open' | 'planned' | 'dismissed';
+
+/** One grounded segment of a proposed talk's outline. */
+export interface TalkSegment {
+  title: string;
+  summary: string;
+  utteranceIds: string[]; // receipts grounding this segment
+}
+
+/** A candidate long-form talk the corpus can support — the discovery layer of `talk_kit`
+ *  (docs/specs/talk-kit.md). Grounded (receipts + a grounded outline), tied to a concrete goal and
+ *  outcome, scored for feasibility (corpus support) and novelty (vs already-delivered content). A
+ *  proposal, not a talk_kit: "plan" marks one to develop later. */
+export interface TalkProposal {
+  id: string;
+  workspaceId: string;
+  title: string;
+  goal: string; // concrete goal category (LLM-chosen; Rule 18)
+  outcome: string; // the positive company outcome this talk drives
+  thesis: string; // what the talk argues/teaches
+  audience: string; // who it's for
+  format: string; // suggested delivery format (webinar, workshop, conference_talk, podcast, …)
+  outline: TalkSegment[];
+  sourceUtteranceIds: string[]; // receipts making the talk feasible
+  feasibility: number; // 0..1 how well the corpus supports a whole talk
+  novelty: number; // 0..1 vs already-delivered talks/content
+  rationale: string; // why now / why this
+  buildsOn: string[]; // source titles it builds on/overlaps (delivered-talk awareness)
+  status: TalkStatus;
+  createdAt: string;
+}
+
 /** The distilled brand voice — style plus soul — inferred from the workspace's published output.
  *  Each judgemental trait carries example utterance ids (receipts) it was inferred from. */
 export interface VoicePersonaProfile {
