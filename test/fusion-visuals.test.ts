@@ -15,6 +15,7 @@ const scenes: Record<string, StoryboardScene> = {
   timeline: { visual: 'timeline', title: 'How it closed', timeline: { steps: [{ label: '85 interviews', detail: 'first' }, { label: 'Cold email' }, { label: '$300K deal' }] }, narration: 'n' },
   bignumbers: { visual: 'bignumbers', title: 'The numbers', bignumbers: { items: [{ value: '95%', label: 'no impact' }, { value: '$37B', label: 'spend' }, { value: '10x', label: 'per employee' }, { value: '18mo', label: 'to $10M' }] }, narration: 'n' },
   donut: { visual: 'donut', title: 'Adoption', donut: { value: 73, label: 'of teams use AI in GTM', unit: '%' }, narration: 'n' },
+  pictograph: { visual: 'pictograph', title: 'The failure rate', pictograph: { filled: 95, total: 100, label: 'of pilots show no P&L impact' }, narration: 'n' },
 };
 
 const THEMES: FusionTheme[] = ['midnight', 'aurora', 'editorial', 'noir', 'sunrise'];
@@ -46,7 +47,7 @@ describe('fusion-visuals renderScene — all scene types × all themes', () => {
 
 describe('fusion-visuals renderSceneFrame — animation over time', () => {
   const animated: StoryboardScene[] = [
-    scenes.chart!, scenes.donut!, scenes.bignumbers!, scenes.stat!, scenes.bullets!, scenes.timeline!, scenes.comparison!,
+    scenes.chart!, scenes.donut!, scenes.bignumbers!, scenes.stat!, scenes.bullets!, scenes.timeline!, scenes.comparison!, scenes.pictograph!,
   ];
   for (const scene of animated) {
     it(`renders a valid frame at t = 0 / 0.7 / 1.5 (settled): ${scene.visual}`, () => {
@@ -68,5 +69,17 @@ describe('fusion-visuals renderSceneFrame — animation over time', () => {
   it('renderScene equals a fully-settled frame', () => {
     const sc = { width: 1280, height: 720, index: 0, total: 4, theme: 'noir' as FusionTheme };
     expect(renderScene(scenes.bignumbers!, sc).equals(renderSceneFrame(scenes.bignumbers!, sc, 1e6))).toBe(true);
+  });
+
+  it('emphasis pulse produces a distinct frame mid-pop (stat scales) vs before it', () => {
+    const sc = { width: 1280, height: 720, index: 0, total: 4, theme: 'aurora' as FusionTheme };
+    const beforePulse = renderSceneFrame(scenes.stat!, sc, 1.0); // counted up, not yet pulsing
+    const midPulse = renderSceneFrame(scenes.stat!, sc, 1.47); // ~peak of the pulse at ~1.3+dur/2
+    expect(beforePulse.equals(midPulse)).toBe(false);
+  });
+
+  it('pictograph normalizes a large total to a bounded grid without crashing', () => {
+    const big: StoryboardScene = { visual: 'pictograph', title: 'Scale', pictograph: { filled: 8500, total: 10000, label: 'x' }, narration: 'n' };
+    for (const theme of THEMES) expect(isPng(renderSceneFrame(big, { width: 1280, height: 720, index: 0, total: 2, theme }, 5))).toBe(true);
   });
 });

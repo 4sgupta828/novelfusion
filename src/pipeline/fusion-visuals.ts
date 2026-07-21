@@ -72,8 +72,9 @@ export interface SceneCtx {
   brand?: string;
 }
 
-// Longest entrance a scene animates over; after this a scene is fully settled (used to bound frame work).
-export const SCENE_ANIM_SEC = 1.5;
+// Longest entrance a scene animates over; after this a scene is fully settled (bounds frame work).
+// Slightly longer than the entrances so emphasis pulses (which fire after data settles) complete.
+export const SCENE_ANIM_SEC = 1.8;
 
 // ---------- primitives ----------
 
@@ -123,6 +124,20 @@ function withReveal(ctx: SKRSContext2D, r: number, slideY: number, fn: () => voi
   ctx.save();
   ctx.globalAlpha = Math.min(1, r);
   if (slideY) ctx.translate(0, (1 - Math.min(1, r)) * slideY);
+  fn();
+  ctx.restore();
+}
+
+/** Emphasis beat: a one-shot scale bump (1 → ~1.14 → 1) starting at `at`s — fires after data settles. */
+const pulse = (t: number, at: number, dur = 0.34) => {
+  const p = (t - at) / dur;
+  return p <= 0 || p >= 1 ? 1 : 1 + 0.14 * Math.sin(p * Math.PI);
+};
+/** Draw `fn` scaled by `s` about (cx, cy). */
+function withScale(ctx: SKRSContext2D, cx: number, cy: number, s: number, fn: () => void) {
+  if (s === 1) { fn(); return; }
+  ctx.save();
+  ctx.translate(cx, cy); ctx.scale(s, s); ctx.translate(-cx, -cy);
   fn();
   ctx.restore();
 }
@@ -213,12 +228,15 @@ export function renderSceneFrame(scene: StoryboardScene, sc: SceneCtx, tSec: num
       break;
     case 'stat': {
       const p = reveal(t, 0.4, 0.85);
+      const statSize = Math.round(w * 0.14);
       withReveal(ctx, reveal(t, 0.35, 0.4), slide, () => {
-        ctx.fillStyle = accent;
-        const statSize = Math.round(w * 0.14);
-        ctx.font = `800 ${statSize}px ${th.titleFace}`;
-        ctx.textBaseline = 'top';
-        ctx.fillText(countUp(scene.stat?.value ?? '', p), pad, bodyTop);
+        // emphasis: a scale pop right after the count-up finishes (~1.25s)
+        withScale(ctx, pad + w * 0.09, bodyTop + statSize * 0.5, pulse(t, 1.3), () => {
+          ctx.fillStyle = accent;
+          ctx.font = `800 ${statSize}px ${th.titleFace}`;
+          ctx.textBaseline = 'top';
+          ctx.fillText(countUp(scene.stat?.value ?? '', p), pad, bodyTop);
+        });
       });
       withReveal(ctx, reveal(t, 0.7, 0.5), slide, () => {
         ctx.fillStyle = th.muted;
@@ -372,24 +390,61 @@ export function renderSceneFrame(scene: StoryboardScene, sc: SceneCtx, tSec: num
       const rad = Math.min(w, h) * 0.16;
       const lw = rad * 0.38;
       const sweep = reveal(t, 0.5, 0.9);
-      ctx.lineWidth = lw; ctx.lineCap = 'round';
-      ctx.strokeStyle = th.muted + '33';
-      ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.stroke();
-      if (sweep > 0.001) {
-        ctx.strokeStyle = accent;
-        ctx.beginPath(); ctx.arc(cx, cy, rad, -Math.PI / 2, -Math.PI / 2 + (val / 100) * Math.PI * 2 * sweep); ctx.stroke();
-      }
-      ctx.fillStyle = th.ink;
-      ctx.font = `800 ${Math.round(rad * 0.6)}px ${th.titleFace}`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(`${Math.round(val * sweep)}${scene.donut?.unit ?? '%'}`, cx, cy);
-      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      withScale(ctx, cx, cy, pulse(t, 1.45), () => { // emphasis pop once the ring finishes sweeping
+        ctx.lineWidth = lw; ctx.lineCap = 'round';
+        ctx.strokeStyle = th.muted + '33';
+        ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.stroke();
+        if (sweep > 0.001) {
+          ctx.strokeStyle = accent;
+          ctx.beginPath(); ctx.arc(cx, cy, rad, -Math.PI / 2, -Math.PI / 2 + (val / 100) * Math.PI * 2 * sweep); ctx.stroke();
+        }
+        ctx.fillStyle = th.ink;
+        ctx.font = `800 ${Math.round(rad * 0.6)}px ${th.titleFace}`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(`${Math.round(val * sweep)}${scene.donut?.unit ?? '%'}`, cx, cy);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      });
       withReveal(ctx, reveal(t, 0.6, 0.5), slide, () => {
         ctx.fillStyle = th.muted;
         ctx.font = `500 ${Math.round(w * 0.026)}px ${th.bodyFace}`;
         ctx.textBaseline = 'top';
         let yy = bodyTop + rad * 0.2;
         for (const line of wrap(ctx, scene.donut?.label ?? '', bodyW * 0.44).slice(0, 4)) { ctx.fillText(line, pad, yy); yy += w * 0.04; }
+      });
+      break;
+    }
+    case 'pictograph': {
+      // unit chart (data-humanism): a grid of `total` icons, `filled` of them highlighted, filling
+      // in staggered. Large totals normalize to a ≤50-dot grid preserving the ratio.
+      const rawTotal = Math.max(1, Math.round(scene.pictograph?.total ?? 10));
+      const rawFilled = clamp(Math.round(scene.pictograph?.filled ?? 0), 0, rawTotal);
+      const N = Math.min(rawTotal, 50);
+      const filledN = Math.round((rawFilled / rawTotal) * N);
+      const cols = Math.min(10, N);
+      const rows = Math.ceil(N / cols);
+      const cell = Math.min(w * 0.062, (bodyW) / cols, (h - bodyTop - pad * 1.6) / rows);
+      const dotR = cell * 0.32;
+      const gx = pad, gy = bodyTop + w * 0.01;
+      for (let k = 0; k < N; k++) {
+        const col = k % cols, row = Math.floor(k / cols);
+        const dx = gx + col * cell + cell * 0.5, dy2 = gy + row * cell + cell * 0.5;
+        const on = k < filledN;
+        const r = reveal(t, 0.5 + k * 0.035, 0.35); // staggered fill-in
+        withScale(ctx, dx, dy2, on ? pulse(t, 0.5 + k * 0.035 + 0.28, 0.28) : 1, () => {
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, on ? r : 0.28 + r * 0.0);
+          ctx.beginPath(); ctx.arc(dx, dy2, dotR, 0, Math.PI * 2);
+          if (on) { ctx.fillStyle = accent; ctx.globalAlpha = Math.min(1, r); ctx.fill(); }
+          else { ctx.strokeStyle = th.muted + '66'; ctx.lineWidth = Math.max(1.5, w * 0.002); ctx.globalAlpha = Math.min(1, reveal(t, 0.5, 0.6)); ctx.stroke(); }
+          ctx.restore();
+        });
+      }
+      withReveal(ctx, reveal(t, 0.7, 0.5), slide, () => {
+        ctx.fillStyle = th.muted;
+        ctx.font = `500 ${Math.round(w * 0.026)}px ${th.bodyFace}`;
+        ctx.textBaseline = 'top';
+        const ly = gy + rows * cell + w * 0.02;
+        for (const line of wrap(ctx, scene.pictograph?.label ?? '', bodyW).slice(0, 2)) { ctx.fillText(line, pad, ly); }
       });
       break;
     }

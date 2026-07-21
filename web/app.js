@@ -1475,7 +1475,7 @@ function fusionBarHtml() {
         <label>Aspect ${fsel('fusion-format', 'Aspect', ['16:9', '9:16', '1:1'])}</label>
         <label>Voice ${fsel('fusion-voice', 'Voice', FUSION_VOICES)}</label>
         <label>Model ${fsel('fusion-model', 'Voice model', FUSION_MODELS)}</label>
-        <label>Transition ${fsel('fusion-transition', 'Transition', [['fade', 'dip to black'], ['crossfade', 'crossfade'], ['cut', 'hard cut']])}</label>
+        <label>Transition ${fsel('fusion-transition', 'Transition', [['fade', 'dip to black'], ['crossfade', 'crossfade'], ['dissolve', 'dissolve'], ['slide', 'slide'], ['wipe', 'wipe'], ['reveal', 'reveal'], ['circle', 'circle'], ['cut', 'hard cut']])}</label>
         <label>Motion ${fsel('fusion-motion', 'Motion', [['kenburns', 'ken burns'], ['static', 'static']])}</label>
         <label>Speed ${fsel('fusion-speed', 'Speed', [['1', '1.0×'], ['0.9', '0.9×'], ['1.1', '1.1×'], ['1.25', '1.25×']])}</label>
         <label class="fusion-cap"><input type="checkbox" class="fusion-captions"> captions</label>

@@ -243,7 +243,7 @@ export interface RenderedClip {
 
 export type SceneVisual =
   | 'title' | 'bullets' | 'stat' | 'quote' | 'chart'
-  | 'comparison' | 'timeline' | 'bignumbers' | 'donut';
+  | 'comparison' | 'timeline' | 'bignumbers' | 'donut' | 'pictograph';
 
 /** Visual theme for a fusion video (palette + background + typography). */
 export type FusionTheme = 'midnight' | 'aurora' | 'editorial' | 'noir' | 'sunrise';
@@ -262,6 +262,7 @@ export interface StoryboardScene {
   timeline?: { steps: { label: string; detail?: string }[] };
   bignumbers?: { items: { value: string; label: string }[] };
   donut?: { value: number; label: string; unit?: string };
+  pictograph?: { filled: number; total: number; label: string }; // unit chart: `filled` of `total` icons
 }
 
 /** An EXPERIMENTAL generated fusion video (ngram-style): storyboard + canvas infographics + AI

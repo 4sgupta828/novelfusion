@@ -51,15 +51,21 @@ const SceneSchema = z.object({
   bullets: z.array(z.string()).optional().describe('bullets scenes: 2–5 SHORT phrases (not sentences)'),
   stat: z.object({ value: z.string(), label: z.string() }).optional().describe('stat scenes: ONE big number/value + its label'),
   quote: z.object({ text: z.string(), attribution: z.string().optional() }).optional().describe('quote scenes: a punchy line + who said it'),
-  chart: z.object({ unit: z.string().optional(), bars: z.array(z.object({ label: z.string(), value: z.number() })).min(2).max(6) }).optional().describe('chart scenes: 2–6 labeled bars'),
-  comparison: z.object({ left: z.object({ heading: z.string(), items: z.array(z.string()).min(1).max(4) }), right: z.object({ heading: z.string(), items: z.array(z.string()).min(1).max(4) }) }).optional().describe('comparison scenes: two sides (e.g. old vs new, us vs them)'),
-  timeline: z.object({ steps: z.array(z.object({ label: z.string(), detail: z.string().optional() })).min(2).max(5) }).optional().describe('timeline scenes: an ordered sequence of steps'),
-  bignumbers: z.object({ items: z.array(z.object({ value: z.string(), label: z.string() })).min(2).max(4) }).optional().describe('bignumbers scenes: 2–4 headline stats in a grid'),
-  donut: z.object({ value: z.number().min(0).max(100), label: z.string(), unit: z.string().optional() }).optional().describe('donut scenes: ONE percentage (0–100) as a ring + label'),
+  // NOTE: array counts are guidance in `describe`, NOT zod .min/.max — bounded-repetition constraints
+  // enlarge the structured-output decoding grammar. The renderers already clamp/slice defensively.
+  // ALSO: a 10th scene type (pictograph) tipped this schema past Anthropic's grammar-compilation
+  // limit ("grammar compilation timed out"), so pictograph is NOT offered in generation — its
+  // renderer + type are kept ready, to be re-enabled once the schema is restructured (e.g. a
+  // discriminated union keyed on `visual`, so one scene's grammar isn't the union of all field sets).
+  chart: z.object({ unit: z.string().optional(), bars: z.array(z.object({ label: z.string(), value: z.number() })) }).optional().describe('chart scenes: 2–6 labeled bars'),
+  comparison: z.object({ left: z.object({ heading: z.string(), items: z.array(z.string()) }), right: z.object({ heading: z.string(), items: z.array(z.string()) }) }).optional().describe('comparison scenes: two sides (e.g. old vs new, us vs them); 1–4 items each'),
+  timeline: z.object({ steps: z.array(z.object({ label: z.string(), detail: z.string().optional() })) }).optional().describe('timeline scenes: an ordered sequence of 2–5 steps'),
+  bignumbers: z.object({ items: z.array(z.object({ value: z.string(), label: z.string() })) }).optional().describe('bignumbers scenes: 2–4 headline stats in a grid'),
+  donut: z.object({ value: z.number(), label: z.string(), unit: z.string().optional() }).optional().describe('donut scenes: ONE percentage (0–100) as a ring + label'),
 });
 const StoryboardSchema = z.object({
   title: z.string().describe('the video title'),
-  scenes: z.array(SceneSchema).min(4).max(9),
+  scenes: z.array(SceneSchema).describe('4–9 scenes'),
 });
 
 const SYSTEM = `You are a world-class video director turning source material into a punchy, narrated explainer STORYBOARD (a sharp 45–90s social explainer). Output scenes; each has VOICEOVER narration (heard) and an on-screen VISUAL (seen) — they complement each other, they are not the same text.
@@ -122,7 +128,9 @@ async function probeDuration(file: string): Promise<number> {
   return parseFloat(stdout.trim()) || 0;
 }
 
-export type Transition = 'fade' | 'crossfade' | 'cut';
+export type Transition = 'fade' | 'cut' | 'crossfade' | 'dissolve' | 'slide' | 'wipe' | 'reveal' | 'circle';
+// transitions that blend via ffmpeg xfade (everything except the concat-based fade/cut) → xfade type
+const XFADE_MAP: Record<string, string> = { crossfade: 'fade', dissolve: 'dissolve', slide: 'slideleft', wipe: 'wipeleft', reveal: 'smoothleft', circle: 'circleopen' };
 export type Motion = 'kenburns' | 'static';
 
 export interface RenderFusionOpts {
@@ -183,7 +191,8 @@ export async function renderFusionVideo(workspaceId: string, opts: RenderFusionO
     // 2. Per scene: infographic PNG + TTS voiceover → a scene clip.
     const sceneFiles: string[] = [];
     const durations: number[] = [];
-    const perSceneFades = transition === 'fade'; // crossfade/cut clips carry no built-in fades
+    const xfadeType = XFADE_MAP[transition]; // set only for blend transitions
+    const perSceneFades = transition === 'fade'; // only the dip-to-black path bakes per-scene fades
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i]!;
       const mp3 = path.join(tmp, `s${i}.mp3`);
@@ -229,8 +238,8 @@ export async function renderFusionVideo(workspaceId: string, opts: RenderFusionO
     // 3. Assemble.
     const outName = `${randomBytes(9).toString('hex')}.mp4`;
     const outFile = path.join(FUSION_DIR, outName);
-    if (transition === 'crossfade' && sceneFiles.length > 1) {
-      // xfade video + acrossfade audio, chained with accumulating offsets.
+    if (xfadeType && sceneFiles.length > 1) {
+      // xfade video (styled) + acrossfade audio, chained with accumulating offsets.
       const inputs: string[] = [];
       for (const f of sceneFiles) inputs.push('-i', f);
       const vparts: string[] = [];
@@ -242,7 +251,7 @@ export async function renderFusionVideo(workspaceId: string, opts: RenderFusionO
         const offset = Math.max(0, prevLen - XFADE);
         const vout = k === sceneFiles.length - 1 ? '[v]' : `[v${k}]`;
         const aout = k === sceneFiles.length - 1 ? '[a]' : `[a${k}]`;
-        vparts.push(`${vlabel}[${k}:v]xfade=transition=fade:duration=${XFADE}:offset=${offset.toFixed(3)}${vout}`);
+        vparts.push(`${vlabel}[${k}:v]xfade=transition=${xfadeType}:duration=${XFADE}:offset=${offset.toFixed(3)}${vout}`);
         aparts.push(`${alabel}[${k}:a]acrossfade=d=${XFADE}${aout}`);
         vlabel = vout; alabel = aout;
         prevLen = prevLen + durations[k]! - XFADE;
