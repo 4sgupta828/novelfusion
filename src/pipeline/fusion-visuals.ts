@@ -1,8 +1,8 @@
 // Canvas infographics for the fusion-video generator — each storyboard scene rendered to a PNG with
 // @napi-rs/canvas (headless Skia, no browser). Pure + deterministic: unit-testable, no DB/network.
-// This is the "creative rendering" layer; motion (ken-burns, transitions) is added at the ffmpeg
-// stage. Themed (5 looks) and multi-format (16:9 / 9:16 / 1:1). Scene types: title, bullets, stat,
-// quote, chart, comparison, timeline, bignumbers, donut.
+// ANIMATED: renderSceneFrame(scene, sc, tSec) draws the scene at time t, so elements enter with
+// staggered easing and data animates (bars grow, donut sweeps, numbers count up, timeline draws) —
+// the fusion.ts pipeline emits a frame sequence per scene. Themed (5 looks) + multi-format.
 
 import { createCanvas, type SKRSContext2D } from '@napi-rs/canvas';
 import type { StoryboardScene, FusionTheme } from '../domain/types.js';
@@ -72,6 +72,9 @@ export interface SceneCtx {
   brand?: string;
 }
 
+// Longest entrance a scene animates over; after this a scene is fully settled (used to bound frame work).
+export const SCENE_ANIM_SEC = 1.5;
+
 // ---------- primitives ----------
 
 function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number) {
@@ -95,9 +98,40 @@ function wrap(ctx: SKRSContext2D, text: string, maxW: number): string[] {
   return lines;
 }
 
+// ---------- animation toolkit ----------
+
+const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+const easeOut = (p: number) => { const q = clamp(p, 0, 1); return 1 - Math.pow(1 - q, 3); };
+/** Eased 0..1 progress for an element that starts at `start`s and animates over `dur`s. */
+const reveal = (t: number, start: number, dur: number) => easeOut((t - start) / dur);
+
+/** Interpolate the leading number in a value string toward its target (odometer count-up). */
+function countUp(value: string, p: number): string {
+  const m = value.match(/\d[\d,]*\.?\d*/);
+  if (!m) return value;
+  const raw = m[0].replace(/,/g, '');
+  const num = parseFloat(raw);
+  if (!isFinite(num)) return value;
+  const cur = num * clamp(p, 0, 1);
+  const shown = raw.includes('.') ? cur.toFixed(1) : String(Math.round(cur));
+  return value.replace(m[0], shown);
+}
+
+/** Draw `fn` faded in (alpha=r) and slid up from `slideY`px. Skips entirely while invisible. */
+function withReveal(ctx: SKRSContext2D, r: number, slideY: number, fn: () => void) {
+  if (r <= 0.002) return;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, r);
+  if (slideY) ctx.translate(0, (1 - Math.min(1, r)) * slideY);
+  fn();
+  ctx.restore();
+}
+
 // ---------- render ----------
 
-export function renderScene(scene: StoryboardScene, sc: SceneCtx): Buffer {
+/** Render one scene AT time `tSec` (0 = scene start). Elements enter staggered/eased; data animates. */
+export function renderSceneFrame(scene: StoryboardScene, sc: SceneCtx, tSec: number): Buffer {
+  const t = tSec;
   const { width: w, height: h } = sc;
   const th = THEMES[sc.theme] ?? THEMES.midnight;
   const accent = th.palette[sc.index % th.palette.length]!;
@@ -105,78 +139,122 @@ export function renderScene(scene: StoryboardScene, sc: SceneCtx): Buffer {
   const ctx = canvas.getContext('2d');
   const pad = Math.round(w * 0.07);
   const contentW = w - pad * 2;
+  const slide = w * 0.02;
 
   th.bg(ctx, w, h, accent);
 
   // eyebrow
-  ctx.fillStyle = accent;
-  ctx.font = `600 ${Math.round(w * 0.018)}px ${th.bodyFace}`;
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillText(`${sc.brand ? sc.brand.toUpperCase() + '  ·  ' : ''}${String(sc.index + 1).padStart(2, '0')} / ${String(sc.total).padStart(2, '0')}`, pad, pad + w * 0.02);
+  withReveal(ctx, reveal(t, 0, 0.4), slide * 0.6, () => {
+    ctx.fillStyle = accent;
+    ctx.font = `600 ${Math.round(w * 0.018)}px ${th.bodyFace}`;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(`${sc.brand ? sc.brand.toUpperCase() + '  ·  ' : ''}${String(sc.index + 1).padStart(2, '0')} / ${String(sc.total).padStart(2, '0')}`, pad, pad + w * 0.02);
+  });
 
-  // title (all scenes)
+  // title (staggered per line) + accent underline (draws its width)
   ctx.textBaseline = 'top';
-  ctx.fillStyle = th.ink;
   const titleSize = Math.round(w * (scene.visual === 'title' ? 0.062 : 0.048));
   ctx.font = `${th.titleWeight} ${titleSize}px ${th.titleFace}`;
+  const titleLines = wrap(ctx, scene.title, contentW).slice(0, 3);
   let y = pad + titleSize * 1.3;
-  for (const line of wrap(ctx, scene.title, contentW).slice(0, 3)) { ctx.fillText(line, pad, y); y += titleSize * 1.14; }
-  ctx.fillStyle = accent;
-  roundRect(ctx, pad, y + titleSize * 0.12, Math.min(contentW, w * 0.22), Math.max(4, w * 0.006), 4);
-  ctx.fill();
+  titleLines.forEach((line, i) => {
+    withReveal(ctx, reveal(t, 0.05 + i * 0.07, 0.45), slide, () => {
+      ctx.fillStyle = th.ink;
+      ctx.font = `${th.titleWeight} ${titleSize}px ${th.titleFace}`;
+      ctx.textBaseline = 'top';
+      ctx.fillText(line, pad, y);
+    });
+    y += titleSize * 1.14;
+  });
+  const ulW = Math.min(contentW, w * 0.22) * reveal(t, 0.35, 0.5);
+  if (ulW > 1) { ctx.fillStyle = accent; roundRect(ctx, pad, y + titleSize * 0.12, ulW, Math.max(4, w * 0.006), 4); ctx.fill(); }
   const bodyTop = y + titleSize * 0.7 + w * 0.03;
   const bodyW = contentW;
 
-  const drawList = (items: string[], top: number, x: number, colW: number, accentColor: string, max = 5) => {
-    let yy = top;
+  const BODY_START = 0.5, STAGGER = 0.13, ITEM_DUR = 0.42;
+
+  // animated staggered list (bullets / comparison columns)
+  const drawList = (items: string[], top: number, x: number, colW: number, accentColor: string, start: number, max = 5) => {
     const size = Math.round(w * 0.024);
-    ctx.font = `500 ${size}px ${th.bodyFace}`;
-    for (const b of (items ?? []).slice(0, max)) {
-      ctx.fillStyle = accentColor;
-      ctx.beginPath();
-      ctx.arc(x + size * 0.35, yy + size * 0.55, size * 0.26, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = th.ink;
-      for (const line of wrap(ctx, b, colW - size * 1.5)) { ctx.fillText(line, x + size * 1.3, yy); yy += size * 1.3; }
-      yy += size * 0.5;
-    }
+    let yy = top;
+    (items ?? []).slice(0, max).forEach((b, i) => {
+      const r = reveal(t, start + i * STAGGER, ITEM_DUR);
+      const lines = wrap(ctx, b, colW - size * 1.5);
+      const blockY = yy;
+      withReveal(ctx, r, slide, () => {
+        ctx.font = `500 ${size}px ${th.bodyFace}`;
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = accentColor;
+        ctx.beginPath();
+        ctx.arc(x + size * 0.35, blockY + size * 0.55, size * 0.26, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = th.ink;
+        let ly = blockY;
+        for (const line of lines) { ctx.fillText(line, x + size * 1.3, ly); ly += size * 1.3; }
+      });
+      yy += lines.length * size * 1.3 + size * 0.5;
+    });
   };
 
   switch (scene.visual) {
     case 'title':
       if (scene.subtitle) {
-        ctx.fillStyle = th.muted;
-        ctx.font = `400 ${Math.round(w * 0.03)}px ${th.bodyFace}`;
-        let yy = bodyTop;
-        for (const line of wrap(ctx, scene.subtitle, bodyW).slice(0, 4)) { ctx.fillText(line, pad, yy); yy += w * 0.042; }
+        withReveal(ctx, reveal(t, 0.5, 0.5), slide, () => {
+          ctx.fillStyle = th.muted;
+          ctx.font = `400 ${Math.round(w * 0.03)}px ${th.bodyFace}`;
+          ctx.textBaseline = 'top';
+          let yy = bodyTop;
+          for (const line of wrap(ctx, scene.subtitle!, bodyW).slice(0, 4)) { ctx.fillText(line, pad, yy); yy += w * 0.042; }
+        });
       }
       break;
     case 'bullets':
-      drawList(scene.bullets ?? [], bodyTop, pad, bodyW, accent);
+      drawList(scene.bullets ?? [], bodyTop, pad, bodyW, accent, BODY_START);
       break;
     case 'stat': {
-      ctx.fillStyle = accent;
-      const statSize = Math.round(w * 0.14);
-      ctx.font = `800 ${statSize}px ${th.titleFace}`;
-      ctx.fillText(scene.stat?.value ?? '', pad, bodyTop);
-      ctx.fillStyle = th.muted;
-      ctx.font = `400 ${Math.round(w * 0.028)}px ${th.bodyFace}`;
-      let yy = bodyTop + statSize * 1.05;
-      for (const line of wrap(ctx, scene.stat?.label ?? '', bodyW).slice(0, 3)) { ctx.fillText(line, pad, yy); yy += w * 0.04; }
+      const p = reveal(t, 0.4, 0.85);
+      withReveal(ctx, reveal(t, 0.35, 0.4), slide, () => {
+        ctx.fillStyle = accent;
+        const statSize = Math.round(w * 0.14);
+        ctx.font = `800 ${statSize}px ${th.titleFace}`;
+        ctx.textBaseline = 'top';
+        ctx.fillText(countUp(scene.stat?.value ?? '', p), pad, bodyTop);
+      });
+      withReveal(ctx, reveal(t, 0.7, 0.5), slide, () => {
+        ctx.fillStyle = th.muted;
+        ctx.font = `400 ${Math.round(w * 0.028)}px ${th.bodyFace}`;
+        ctx.textBaseline = 'top';
+        let yy = bodyTop + Math.round(w * 0.14) * 1.05;
+        for (const line of wrap(ctx, scene.stat?.label ?? '', bodyW).slice(0, 3)) { ctx.fillText(line, pad, yy); yy += w * 0.04; }
+      });
       break;
     }
     case 'quote': {
-      ctx.fillStyle = accent;
-      ctx.font = `700 ${Math.round(w * 0.12)}px Georgia`;
-      ctx.fillText('“', pad, bodyTop - w * 0.02);
-      ctx.fillStyle = th.ink;
-      ctx.font = `italic 600 ${Math.round(w * 0.038)}px Georgia`;
+      withReveal(ctx, reveal(t, 0.3, 0.4), 0, () => {
+        ctx.fillStyle = accent;
+        ctx.font = `700 ${Math.round(w * 0.12)}px Georgia`;
+        ctx.textBaseline = 'top';
+        ctx.fillText('“', pad, bodyTop - w * 0.02);
+      });
+      const lines = wrap(ctx, scene.quote?.text ?? '', bodyW).slice(0, 5);
       let yy = bodyTop + w * 0.06;
-      for (const line of wrap(ctx, scene.quote?.text ?? '', bodyW).slice(0, 5)) { ctx.fillText(line, pad, yy); yy += w * 0.052; }
+      lines.forEach((line, i) => {
+        const ly = yy;
+        withReveal(ctx, reveal(t, 0.5 + i * 0.1, 0.4), slide, () => {
+          ctx.fillStyle = th.ink;
+          ctx.font = `italic 600 ${Math.round(w * 0.038)}px Georgia`;
+          ctx.textBaseline = 'top';
+          ctx.fillText(line, pad, ly);
+        });
+        yy += w * 0.052;
+      });
       if (scene.quote?.attribution) {
-        ctx.fillStyle = th.muted;
-        ctx.font = `500 ${Math.round(w * 0.024)}px ${th.bodyFace}`;
-        ctx.fillText(`— ${scene.quote.attribution}`, pad, yy + w * 0.02);
+        withReveal(ctx, reveal(t, 0.5 + lines.length * 0.1 + 0.15, 0.4), slide, () => {
+          ctx.fillStyle = th.muted;
+          ctx.font = `500 ${Math.round(w * 0.024)}px ${th.bodyFace}`;
+          ctx.textBaseline = 'top';
+          ctx.fillText(`— ${scene.quote!.attribution}`, pad, yy + w * 0.02);
+        });
       }
       break;
     }
@@ -189,20 +267,25 @@ export function renderScene(scene: StoryboardScene, sc: SceneCtx): Buffer {
       ctx.textBaseline = 'middle';
       bars.forEach((b, i) => {
         const cy = bodyTop + i * rowH + rowH * 0.5;
+        const grow = reveal(t, 0.5 + i * 0.1, 0.6);
+        const fade = reveal(t, 0.5 + i * 0.1, 0.35);
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, fade);
         ctx.fillStyle = th.muted;
         ctx.font = `500 ${Math.round(w * 0.02)}px ${th.bodyFace}`;
         ctx.fillText(b.label.slice(0, 24), pad, cy);
-        const bw = Math.max(6, (b.value / max) * barMaxW);
+        const bw = Math.max(2, (b.value / max) * barMaxW * grow);
         const bx = pad + labelW;
         const bh = rowH * 0.5;
         const cAcc = th.palette[i % th.palette.length]!;
-        const grad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+        const grad = ctx.createLinearGradient(bx, 0, bx + Math.max(bw, 1), 0);
         grad.addColorStop(0, cAcc); grad.addColorStop(1, cAcc + 'bb');
         ctx.fillStyle = grad;
         roundRect(ctx, bx, cy - bh / 2, bw, bh, bh / 2); ctx.fill();
         ctx.fillStyle = th.ink;
         ctx.font = `700 ${Math.round(w * 0.02)}px ${th.bodyFace}`;
-        ctx.fillText(`${b.value}${scene.chart?.unit ?? ''}`, bx + bw + w * 0.012, cy);
+        ctx.fillText(`${Math.round(b.value * grow)}${scene.chart?.unit ?? ''}`, bx + bw + w * 0.012, cy);
+        ctx.restore();
       });
       ctx.textBaseline = 'top';
       break;
@@ -210,15 +293,18 @@ export function renderScene(scene: StoryboardScene, sc: SceneCtx): Buffer {
     case 'comparison': {
       const c = scene.comparison;
       const colW = (bodyW - w * 0.04) / 2;
-      const cols = [{ d: c?.left, x: pad, ac: th.palette[0]! }, { d: c?.right, x: pad + colW + w * 0.04, ac: th.palette[2 % th.palette.length]! }];
+      const cols = [{ d: c?.left, x: pad, ac: th.palette[0]!, s: 0.4 }, { d: c?.right, x: pad + colW + w * 0.04, ac: th.palette[2 % th.palette.length]!, s: 0.55 }];
       const panelH = h - bodyTop - pad * 1.4;
       for (const col of cols) {
-        ctx.fillStyle = th.panel;
-        roundRect(ctx, col.x, bodyTop, colW, panelH, w * 0.014); ctx.fill();
-        ctx.fillStyle = col.ac;
-        ctx.font = `700 ${Math.round(w * 0.026)}px ${th.bodyFace}`;
-        ctx.fillText((col.d?.heading ?? '').slice(0, 24), col.x + w * 0.025, bodyTop + w * 0.028);
-        drawList(col.d?.items ?? [], bodyTop + w * 0.09, col.x + w * 0.025, colW - w * 0.05, col.ac, 4);
+        withReveal(ctx, reveal(t, col.s, 0.45), slide, () => {
+          ctx.fillStyle = th.panel;
+          roundRect(ctx, col.x, bodyTop, colW, panelH, w * 0.014); ctx.fill();
+          ctx.fillStyle = col.ac;
+          ctx.font = `700 ${Math.round(w * 0.026)}px ${th.bodyFace}`;
+          ctx.textBaseline = 'top';
+          ctx.fillText((col.d?.heading ?? '').slice(0, 24), col.x + w * 0.025, bodyTop + w * 0.028);
+        });
+        drawList(col.d?.items ?? [], bodyTop + w * 0.09, col.x + w * 0.025, colW - w * 0.05, col.ac, col.s + 0.25, 4);
       }
       break;
     }
@@ -226,27 +312,31 @@ export function renderScene(scene: StoryboardScene, sc: SceneCtx): Buffer {
       const steps = (scene.timeline?.steps ?? []).slice(0, 5);
       const gapY = Math.min(w * 0.11, (h - bodyTop - pad * 1.2) / Math.max(1, steps.length));
       const railX = pad + w * 0.02;
+      const railTop = bodyTop + gapY * 0.5, railBot = bodyTop + gapY * (steps.length - 0.5);
+      const railP = reveal(t, 0.4, 0.6);
       ctx.strokeStyle = th.muted + '66';
       ctx.lineWidth = Math.max(2, w * 0.003);
-      ctx.beginPath(); ctx.moveTo(railX, bodyTop + gapY * 0.5); ctx.lineTo(railX, bodyTop + gapY * (steps.length - 0.5)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(railX, railTop); ctx.lineTo(railX, railTop + (railBot - railTop) * railP); ctx.stroke();
       steps.forEach((s, i) => {
         const cy = bodyTop + gapY * (i + 0.5);
         const ac = th.palette[i % th.palette.length]!;
-        ctx.fillStyle = ac;
-        ctx.beginPath(); ctx.arc(railX, cy, w * 0.014, 0, Math.PI * 2); ctx.fill();
-        ctx.fillStyle = th.mode === 'light' ? '#fff' : '#0a0a0a';
-        ctx.font = `700 ${Math.round(w * 0.014)}px ${th.bodyFace}`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(String(i + 1), railX, cy + w * 0.001);
-        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-        ctx.fillStyle = th.ink;
-        ctx.font = `700 ${Math.round(w * 0.024)}px ${th.bodyFace}`;
-        ctx.fillText((s.label ?? '').slice(0, 40), railX + w * 0.04, cy - w * 0.024);
-        if (s.detail) {
-          ctx.fillStyle = th.muted;
-          ctx.font = `400 ${Math.round(w * 0.018)}px ${th.bodyFace}`;
-          ctx.fillText(wrap(ctx, s.detail, bodyW - w * 0.06)[0] ?? '', railX + w * 0.04, cy + w * 0.004);
-        }
+        withReveal(ctx, reveal(t, 0.5 + i * 0.14, 0.42), slide, () => {
+          ctx.fillStyle = ac;
+          ctx.beginPath(); ctx.arc(railX, cy, w * 0.014, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = th.mode === 'light' ? '#fff' : '#0a0a0a';
+          ctx.font = `700 ${Math.round(w * 0.014)}px ${th.bodyFace}`;
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(String(i + 1), railX, cy + w * 0.001);
+          ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+          ctx.fillStyle = th.ink;
+          ctx.font = `700 ${Math.round(w * 0.024)}px ${th.bodyFace}`;
+          ctx.fillText((s.label ?? '').slice(0, 40), railX + w * 0.04, cy - w * 0.024);
+          if (s.detail) {
+            ctx.fillStyle = th.muted;
+            ctx.font = `400 ${Math.round(w * 0.018)}px ${th.bodyFace}`;
+            ctx.fillText(wrap(ctx, s.detail, bodyW - w * 0.06)[0] ?? '', railX + w * 0.04, cy + w * 0.004);
+          }
+        });
       });
       break;
     }
@@ -261,14 +351,18 @@ export function renderScene(scene: StoryboardScene, sc: SceneCtx): Buffer {
         const cx = pad + (i % cols) * (cellW + w * 0.04);
         const cy = bodyTop + Math.floor(i / cols) * (cellH + w * 0.04);
         const ac = th.palette[i % th.palette.length]!;
-        ctx.fillStyle = th.panel;
-        roundRect(ctx, cx, cy, cellW, cellH, w * 0.014); ctx.fill();
-        ctx.fillStyle = ac;
-        ctx.font = `800 ${Math.round(w * 0.058)}px ${th.titleFace}`;
-        ctx.fillText((it.value ?? '').slice(0, 8), cx + w * 0.025, cy + cellH * 0.14);
-        ctx.fillStyle = th.muted;
-        ctx.font = `400 ${Math.round(w * 0.02)}px ${th.bodyFace}`;
-        ctx.fillText(wrap(ctx, it.label ?? '', cellW - w * 0.05)[0] ?? '', cx + w * 0.025, cy + cellH * 0.7);
+        const start = 0.5 + i * 0.12;
+        withReveal(ctx, reveal(t, start, 0.4), slide, () => {
+          ctx.fillStyle = th.panel;
+          roundRect(ctx, cx, cy, cellW, cellH, w * 0.014); ctx.fill();
+          ctx.fillStyle = ac;
+          ctx.font = `800 ${Math.round(w * 0.058)}px ${th.titleFace}`;
+          ctx.textBaseline = 'top';
+          ctx.fillText(countUp((it.value ?? '').slice(0, 8), reveal(t, start + 0.05, 0.6)), cx + w * 0.025, cy + cellH * 0.14);
+          ctx.fillStyle = th.muted;
+          ctx.font = `400 ${Math.round(w * 0.02)}px ${th.bodyFace}`;
+          ctx.fillText(wrap(ctx, it.label ?? '', cellW - w * 0.05)[0] ?? '', cx + w * 0.025, cy + cellH * 0.7);
+        });
       });
       break;
     }
@@ -277,25 +371,33 @@ export function renderScene(scene: StoryboardScene, sc: SceneCtx): Buffer {
       const cx = w * 0.72, cy = bodyTop + (h - bodyTop - pad) * 0.42;
       const rad = Math.min(w, h) * 0.16;
       const lw = rad * 0.38;
+      const sweep = reveal(t, 0.5, 0.9);
       ctx.lineWidth = lw; ctx.lineCap = 'round';
       ctx.strokeStyle = th.muted + '33';
       ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = accent;
-      ctx.beginPath(); ctx.arc(cx, cy, rad, -Math.PI / 2, -Math.PI / 2 + (val / 100) * Math.PI * 2); ctx.stroke();
+      if (sweep > 0.001) {
+        ctx.strokeStyle = accent;
+        ctx.beginPath(); ctx.arc(cx, cy, rad, -Math.PI / 2, -Math.PI / 2 + (val / 100) * Math.PI * 2 * sweep); ctx.stroke();
+      }
       ctx.fillStyle = th.ink;
       ctx.font = `800 ${Math.round(rad * 0.6)}px ${th.titleFace}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(`${scene.donut?.value ?? 0}${scene.donut?.unit ?? '%'}`, cx, cy);
+      ctx.fillText(`${Math.round(val * sweep)}${scene.donut?.unit ?? '%'}`, cx, cy);
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillStyle = th.muted;
-      ctx.font = `500 ${Math.round(w * 0.026)}px ${th.bodyFace}`;
-      let yy = bodyTop + rad * 0.2;
-      for (const line of wrap(ctx, scene.donut?.label ?? '', bodyW * 0.44).slice(0, 4)) { ctx.fillText(line, pad, yy); yy += w * 0.04; }
+      withReveal(ctx, reveal(t, 0.6, 0.5), slide, () => {
+        ctx.fillStyle = th.muted;
+        ctx.font = `500 ${Math.round(w * 0.026)}px ${th.bodyFace}`;
+        ctx.textBaseline = 'top';
+        let yy = bodyTop + rad * 0.2;
+        for (const line of wrap(ctx, scene.donut?.label ?? '', bodyW * 0.44).slice(0, 4)) { ctx.fillText(line, pad, yy); yy += w * 0.04; }
+      });
       break;
     }
   }
 
-  // progress dots
+  // progress dots (fade in)
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, reveal(t, 0.1, 0.3));
   const dy = h - pad * 0.7;
   const dr = Math.max(3, w * 0.004);
   for (let i = 0; i < sc.total; i++) {
@@ -304,5 +406,12 @@ export function renderScene(scene: StoryboardScene, sc: SceneCtx): Buffer {
     ctx.fillStyle = i === sc.index ? accent : (th.mode === 'light' ? '#00000022' : '#ffffff22');
     ctx.fill();
   }
+  ctx.restore();
+
   return canvas.toBuffer('image/png');
+}
+
+/** Fully-settled frame (all animations complete) — for static use and unit tests. */
+export function renderScene(scene: StoryboardScene, sc: SceneCtx): Buffer {
+  return renderSceneFrame(scene, sc, 1e6);
 }

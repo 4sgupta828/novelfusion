@@ -18,7 +18,7 @@ import { randomBytes } from 'node:crypto';
 import { z } from 'zod/v4';
 import { structured } from '../llm/client.js';
 import { synthesizeSpeech, type TtsVoice, type TtsModel } from '../llm/openai.js';
-import { renderScene } from './fusion-visuals.js';
+import { renderSceneFrame, SCENE_ANIM_SEC } from './fusion-visuals.js';
 import {
   getTalkProposal,
   getTalkKit,
@@ -160,7 +160,7 @@ export async function renderFusionVideo(workspaceId: string, opts: RenderFusionO
   const theme: FusionTheme = opts.theme ?? 'midnight';
   const format: ClipFormat = opts.format ?? '16:9';
   const transition: Transition = opts.transition ?? 'fade';
-  const motion: Motion = opts.motion ?? 'kenburns';
+  void (opts.motion); // motion kept in the API for compat; the animated frame path is the motion now
   const captions = opts.captions ?? false;
   const [w, h] = DIMS[format];
   const { origin, originId, title: defaultTitle, material } = gatherMaterial(workspaceId, opts);
@@ -186,19 +186,28 @@ export async function renderFusionVideo(workspaceId: string, opts: RenderFusionO
     const perSceneFades = transition === 'fade'; // crossfade/cut clips carry no built-in fades
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i]!;
-      const png = path.join(tmp, `s${i}.png`);
-      fs.writeFileSync(png, renderScene(scene, { width: w, height: h, index: i, total: scenes.length, theme, brand: 'NovelFusion' }));
-
       const mp3 = path.join(tmp, `s${i}.mp3`);
       fs.writeFileSync(mp3, await synthesizeSpeech(scene.narration, { voice, model: opts.voiceModel, instructions: opts.voiceInstructions, speed: opts.speed }));
       const dur = Math.min(MAX_SCENE, Math.max(MIN_SCENE, (await probeDuration(mp3)) + TAIL_SEC));
       durations.push(dur);
 
-      const frames = Math.round(dur * FPS);
+      // Render the scene as an ANIMATED frame sequence — but only the ENTRANCE frames (the draw is
+      // identical once animations settle). ffmpeg's tpad then freeze-clones the last frame for the
+      // hold, so we write ~SCENE_ANIM_SEC×fps PNGs per scene instead of the full duration.
+      const frameDir = path.join(tmp, `s${i}`);
+      fs.mkdirSync(frameDir, { recursive: true });
+      const sceneCtx = { width: w, height: h, index: i, total: scenes.length, theme, brand: 'NovelFusion' } as const;
+      const totalFrames = Math.round(dur * FPS);
+      const animFrames = Math.min(totalFrames - 1, Math.round(SCENE_ANIM_SEC * FPS));
+      for (let f = 0; f <= animFrames; f++) {
+        fs.writeFileSync(path.join(frameDir, `f_${String(f).padStart(5, '0')}.png`), renderSceneFrame(scene, sceneCtx, f / FPS));
+      }
+      const holdSec = Math.max(0, dur - (animFrames + 1) / FPS);
+
       const fadeOut = Math.max(0, dur - 0.4);
-      let vf = motion === 'kenburns'
-        ? `[0:v]scale=${w}:${h},zoompan=z='min(zoom+0.0007,1.12)':d=${frames}:s=${w}x${h}:fps=${FPS}`
-        : `[0:v]scale=${w}:${h},fps=${FPS}`;
+      // Internal element animation IS the motion (no ffmpeg ken-burns on the animated path). tpad
+      // holds the settled frame for the remainder of the scene.
+      let vf = `[0:v]fps=${FPS},tpad=stop_mode=clone:stop_duration=${holdSec.toFixed(3)}`;
       if (perSceneFades) vf += `,fade=t=in:st=0:d=0.4,fade=t=out:st=${fadeOut}:d=0.4`;
       if (captions) {
         const srt = path.join(tmp, `s${i}.srt`);
@@ -209,7 +218,7 @@ export async function renderFusionVideo(workspaceId: string, opts: RenderFusionO
 
       const clip = path.join(tmp, `s${i}.mp4`);
       await exec('ffmpeg', [
-        '-y', '-loop', '1', '-i', png, '-i', mp3,
+        '-y', '-framerate', String(FPS), '-i', path.join(frameDir, 'f_%05d.png'), '-i', mp3,
         '-filter_complex', vf,
         '-map', '[v]', '-map', '1:a', '-af', 'apad', '-t', String(dur),
         '-r', String(FPS), '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ar', '44100', clip,

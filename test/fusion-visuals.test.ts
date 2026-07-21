@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderScene } from '../src/pipeline/fusion-visuals.js';
+import { renderScene, renderSceneFrame } from '../src/pipeline/fusion-visuals.js';
 import type { StoryboardScene, FusionTheme } from '../src/domain/types.js';
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
@@ -41,5 +41,32 @@ describe('fusion-visuals renderScene — all scene types × all themes', () => {
       const bare: StoryboardScene = { visual: v, title: 'Empty', narration: 'n' };
       expect(isPng(renderScene(bare, { width: 1280, height: 720, index: 0, total: 1, theme: 'midnight' }))).toBe(true);
     }
+  });
+});
+
+describe('fusion-visuals renderSceneFrame — animation over time', () => {
+  const animated: StoryboardScene[] = [
+    scenes.chart!, scenes.donut!, scenes.bignumbers!, scenes.stat!, scenes.bullets!, scenes.timeline!, scenes.comparison!,
+  ];
+  for (const scene of animated) {
+    it(`renders a valid frame at t = 0 / 0.7 / 1.5 (settled): ${scene.visual}`, () => {
+      for (const t of [0, 0.7, 1.5, 5]) {
+        const buf = renderSceneFrame(scene, { width: 1280, height: 720, index: 1, total: 5, theme: 'aurora' }, t);
+        expect(isPng(buf)).toBe(true);
+        expect(buf.length).toBeGreaterThan(1000);
+      }
+    });
+  }
+
+  it('the early frame differs from the settled frame (motion is actually happening)', () => {
+    const sc = { width: 1280, height: 720, index: 0, total: 4, theme: 'midnight' as FusionTheme };
+    const early = renderSceneFrame(scenes.chart!, sc, 0.55);
+    const settled = renderSceneFrame(scenes.chart!, sc, 5);
+    expect(early.equals(settled)).toBe(false); // bars mid-grow ≠ fully grown
+  });
+
+  it('renderScene equals a fully-settled frame', () => {
+    const sc = { width: 1280, height: 720, index: 0, total: 4, theme: 'noir' as FusionTheme };
+    expect(renderScene(scenes.bignumbers!, sc).equals(renderSceneFrame(scenes.bignumbers!, sc, 1e6))).toBe(true);
   });
 });
