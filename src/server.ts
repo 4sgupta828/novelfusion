@@ -70,6 +70,7 @@ import { answerQuery, embedBackfill } from './pipeline/retrieval.js';
 import { discoverSources } from './pipeline/discover.js';
 import { sweepFootprint } from './pipeline/footprint.js';
 import { kickBackfill, startBackfillWorker } from './pipeline/backfill.js';
+import { backupDb } from './db/backup.js';
 import { clusterPrinciples } from './pipeline/clusters.js';
 import { captureEditContent } from './pipeline/edits.js';
 import { assertPrincipleTransition } from './domain/lifecycle.js';
@@ -894,4 +895,8 @@ app.listen(port, '127.0.0.1', () => {
   // Eager background embed/FTS backfill (self-healing sweep). Inert unless retrieval is on.
   startBackfillWorker();
   if (config.flags.corpusQuery && process.env.OPENAI_API_KEY) console.log('  ↳ background backfill worker active (embeds admitted passages eagerly)');
+  // Periodic rotating backups so a long-running server keeps recent snapshots (getDb() already took
+  // one on open). No-op for ephemeral/empty DBs; unref'd so it never keeps the process alive.
+  const timer = setInterval(() => { void backupDb(getDb(), { reason: 'periodic' }); }, 30 * 60_000);
+  timer.unref?.();
 });

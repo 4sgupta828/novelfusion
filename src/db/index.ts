@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { decideConsent } from '../domain/consent.js';
+import { backupDb, assertNotUnexpectedlyEmpty } from './backup.js';
 import type {
   Cluster,
   Collaborator,
@@ -41,6 +42,11 @@ export function getDb(): Database.Database {
   const schema = fs.readFileSync(path.join(here, 'schema.sql'), 'utf-8');
   db.exec(schema);
   migrate(db);
+  // Data safeguards (no-ops for ephemeral/temp DBs): alarm on unexpected emptiness, snapshot on open.
+  try {
+    assertNotUnexpectedlyEmpty(db);
+    void backupDb(db, { reason: 'open' }); // fire-and-forget rotating backup (throttled, skips empty)
+  } catch { /* safeguards must never break DB open */ }
   return db;
 }
 

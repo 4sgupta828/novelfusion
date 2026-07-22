@@ -20,6 +20,7 @@ import {
   updateCluster,
   clusterMemberCounts,
 } from './db/index.js';
+import { backupDb, listBackups, backupDir, restoreFromBackup } from './db/backup.js';
 import { clusterPrinciples } from './pipeline/clusters.js';
 import { ingestFile, ingestDocument, ingestUrl } from './pipeline/ingest.js';
 import { extractMoments } from './pipeline/moments.js';
@@ -51,6 +52,35 @@ program
   .action(() => {
     getDb();
     console.log(`DB ready at ${config.dbPath}`);
+  });
+
+program
+  .command('backup')
+  .description('snapshot the database to the rotating backup store (outside the repo)')
+  .action(async () => {
+    const dest = await backupDb(getDb(), { force: true, reason: 'cli' });
+    if (dest) console.log(`Backup written: ${dest}`);
+    else console.log('No backup created (empty or ephemeral DB, or backups disabled).');
+  });
+
+program
+  .command('backups')
+  .description('list available database backups')
+  .action(() => {
+    const list = listBackups();
+    if (list.length === 0) { console.log(`No backups in ${backupDir()}`); return; }
+    console.log(`Backups in ${backupDir()} (newest first):`);
+    for (const b of list) console.log(`  ${b.file}  ${(b.size / 1e6).toFixed(1)} MB  ${b.mtime.toISOString()}`);
+  });
+
+program
+  .command('restore')
+  .description('restore the database from a backup (latest if no file given)')
+  .argument('[file]', 'backup filename or absolute path (default: latest)')
+  .action((file?: string) => {
+    const { restored, safetyCopy } = restoreFromBackup(file);
+    console.log(`Restored ${config.dbPath} from ${restored}`);
+    if (safetyCopy) console.log(`(previous DB saved to ${safetyCopy})`);
   });
 
 program

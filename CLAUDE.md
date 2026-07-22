@@ -56,6 +56,14 @@ npm run typecheck           # tsc --noEmit
 npm test                    # vitest (pure-code units: parsing, diffing, blast radius)
 npm run build               # tsc → dist/
 
+# Data safeguards — the DB (data/novelfusion.db) is the ONLY copy of everything. Rotating online
+# backups are written OUTSIDE the repo (~/.novelfusion/backups) on server/CLI open + every 30 min;
+# a startup alarm fires if the DB is unexpectedly empty while backups exist. NEVER `rm -rf data` from
+# the repo root; verify/test DBs MUST live under the system temp dir (they are never backed up).
+npm run nf -- backup                             # snapshot the DB to the rotating backup store now
+npm run nf -- backups                            # list available backups (newest first)
+npm run nf -- restore [file]                     # restore from a backup (latest if omitted; safety-copies current first)
+
 # Pipeline CLI — `npm run nf -- --workspace <id> <cmd>` (needs ANTHROPIC_API_KEY for LLM stages)
 npm run nf -- --workspace w1 init                # create local SQLite DB (data/novelfusion.db)
 npm run nf -- --workspace w1 ingest <file...>    # transcripts → sources/utterances
