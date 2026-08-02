@@ -101,11 +101,6 @@ const sampleText = (utts: WsUtterance[]) => {
 
 /** Gather the source material + a default title for the storyboard. */
 function gatherMaterial(workspaceId: string, opts: RenderFusionOpts): { origin: string; originId: string | null; title: string; material: string } {
-  if (opts.material) {   // raw-text path (e.g. an external Q&A answer) — no DB lookup
-    return { origin: opts.origin ?? 'text', originId: null,
-             title: (opts.title ?? 'Untitled').slice(0, 80),
-             material: opts.material.slice(0, MAX_INPUT_CHARS) };
-  }
   if (opts.talkId) {
     const t = getTalkProposal(workspaceId, opts.talkId);
     if (!t) throw new FusionError('not_found', 'Talk not found.');
@@ -142,9 +137,6 @@ export interface RenderFusionOpts {
   talkId?: string;
   momentId?: string;
   sourceId?: string;
-  material?: string;   // raw-text path: storyboard directly from this text (no DB lookup)
-  title?: string;      // title for the raw-text path
-  origin?: string;     // provenance label for the raw-text path (e.g. 'answer')
   voice?: TtsVoice;
   voiceModel?: TtsModel;
   voiceInstructions?: string;
