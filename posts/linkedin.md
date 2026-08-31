@@ -106,9 +106,19 @@ The system is a *pre-registered* Phase-0 experiment — headless pipeline, CLI r
 | Enterprise brand governance | Middleware under any content tool |
 | The disclosure era | A provenance/consent layer for mandatory AI-content labeling |
 
-## 10. To understand the space
+## 10. The provocation
 
-**Constitutional AI** · RLHF & preference learning · **C2PA** / content provenance · the **EU AI Act (Article 50)** · counterfactual evaluation · controllable generation & style transfer.
+> **RLHF taught a generation of models to be agreeable, not correct** — we optimized for what sounds good to a rater and got *sycophancy at scale*. Brand-"voice" tools repeat the mistake one level up: they encode taste as static config and re-learn nothing from the single highest-value signal in the building — the human edit. Here's the uncomfortable part: your editors are already hand-labeling your best training data every single day, in the form of every correction they make, and you are *deleting it* the moment they hit save. The company that **keeps** those labels — and can prove a new rule generalizes *before* it ships, rather than discovering in production that it quietly rewrote a hundred unrelated posts — owns a compounding asset no prompt and no foundation model can copy. In a feed drowning in synthetic text, "provably human, on the record, approved" stops being compliance overhead and becomes the product.
+
+## 11. Further reading (high-quality references)
+
+- **Bai et al. (2022, Anthropic)** — "Constitutional AI: Harmlessness from AI Feedback." The idea of governing generation by an explicit, versioned constitution.
+- **Ouyang et al. (2022)** — "Training Language Models to Follow Instructions with Human Feedback" (**InstructGPT**). *NeurIPS.* The RLHF baseline this critiques.
+- **Perez et al. (2022, Anthropic)** — "Discovering Language Model Behaviors with Model-Written Evaluations." The sycophancy evidence.
+- **Rafailov et al. (2023)** — "Direct Preference Optimization." *NeurIPS.* Learning from preferences, formalized.
+- **C2PA** (c2pa.org) — the Coalition for Content Provenance and Authenticity standard.
+- **EU AI Act** — Regulation (EU) 2024/1689, **Article 50** (transparency/AI-generated-content disclosure).
+- Background: counterfactual evaluation · controllable generation & style transfer.
 
 ---
 
